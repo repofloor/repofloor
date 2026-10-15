@@ -88,6 +88,20 @@ export {
   safeReturnTo,
 } from "./http.js";
 export {
+  PostgresEventPublisher,
+  PostgresEventSubscriber,
+  decodeNotification,
+  encodeNotification,
+  quoteIdentifier,
+  MAX_NOTIFY_BYTES,
+  OFFICE_CHANNEL,
+  type ListenConnection,
+  type NotificationHandler,
+  type OfficeNotification,
+  type PostgresEventPublisherOptions,
+  type PostgresEventSubscriberOptions,
+} from "./publisher-postgres.js";
+export {
   InMemoryEventPublisher,
   NoopEventPublisher,
   type EventPublisher,

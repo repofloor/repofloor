@@ -1,0 +1,34 @@
+{
+  "name": "@repofloor/realtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Full mode fan-out: one WebSocket channel per office, fed by Postgres LISTEN/NOTIFY",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./server": "./dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "test": "node --test --import tsx tests/*.test.ts"
+  },
+  "dependencies": {
+    "@repofloor/api": "workspace:*",
+    "@repofloor/protocol": "workspace:*",
+    "@repofloor/reducer": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

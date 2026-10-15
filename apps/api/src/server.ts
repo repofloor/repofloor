@@ -41,6 +41,8 @@ import {
   type InstallationStore,
 } from "./installations.js";
 import { GitHubOAuth } from "./oauth.js";
+import { NoopEventPublisher, type EventPublisher } from "./publisher.js";
+import { PostgresEventPublisher } from "./publisher-postgres.js";
 import { InMemorySessionStore } from "./session.js";
 import { SignIn } from "./sign-in.js";
 import { InMemoryOfficeStore, type OfficeStore } from "./store.js";
@@ -64,6 +66,11 @@ const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
 let store: OfficeStore;
 let installations: InstallationStore;
+/**
+ * Without Postgres there is nobody to notify: apps/realtime listens on the database.
+ * The noop keeps that honest rather than pretending an in-memory run has fan-out.
+ */
+let publisher: EventPublisher = new NoopEventPublisher();
 let close: () => Promise<void> = async () => {};
 
 if (databaseUrl) {
@@ -91,6 +98,7 @@ if (databaseUrl) {
   });
   store = pg;
   installations = new PostgresInstallationStore(pool);
+  publisher = new PostgresEventPublisher(pool, { logger: log });
 
   const prune = (): void => {
     pg.pruneDeliveries()
@@ -120,6 +128,7 @@ const ttl = Number(process.env["ACCESS_TTL_MS"]);
 const app = createApp({
   webhookSecret: secret,
   store,
+  publisher,
   installations,
   ...(signIn ? { signIn } : {}),
   logger: log,
@@ -136,6 +145,7 @@ server.listen(port, host, () => {
   log.info("listening", {
     url: `http://${host}:${port}`,
     store: databaseUrl ? "postgres" : "memory",
+    fanOut: databaseUrl ? "postgres notify" : "none",
     signIn: signIn ? "enabled" : "disabled",
     ...(signIn ? { callbackUrl: signIn.redirectUri } : {}),
     appIdentity: appAuth ? "configured" : "absent",

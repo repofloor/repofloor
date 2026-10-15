@@ -103,6 +103,31 @@ docker compose logs api --no-log-prefix | jq 'select(.officeId=="repofloor/repof
 docker compose logs api --no-log-prefix | jq 'select(.level=="error")'
 ```
 
+## apps/realtime
+
+Same log format, `service: "realtime"`. It holds no credential of its own: every socket
+is authorized by asking `apps/api` with the caller's own credentials forwarded
+(ADR 0002), so there is nothing in this process to compromise into a wider read.
+
+| msg | fields | when |
+| --- | --- | --- |
+| `listening` | `url`, `apiUrl`, `socketPath` | startup |
+| `listening for office notifications` | `channel` | the `LISTEN` connection is in place |
+| `socket open` / `socket closed` | `officeId`, `viewer`, `clients` | a client joined or left an office |
+| `socket refused` | `officeId`, `reason`, `status` | the upgrade was rejected before a socket existed |
+| `listen connection lost` | `error` | the dedicated connection dropped; a reconnect follows |
+| `listener reconnected; resyncing every live office` | — | a gap nothing can measure, so everyone gets a snapshot |
+
+Two reachability requirements, and both failures are refusals rather than degraded
+service: Postgres (to listen, and to read snapshots) and the api (to authorize).
+
+```bash
+docker compose logs realtime --no-log-prefix | jq 'select(.msg=="socket refused")'
+```
+
+`GET /healthz` on 8788 answers `{ok, offices}` — `offices` being the number of channels
+with at least one client.
+
 ## Health and listing
 
 - `GET /healthz` — liveness, plus the protocol version and whether sign-in is configured.

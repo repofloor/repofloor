@@ -2,11 +2,12 @@
 #
 #   WEBHOOK_SECRET=dev-secret docker compose up --build
 #
-# Brings up apps/api on http://localhost:8787 against a Postgres on 5432. Migrations run
-# at api startup, so the first boot creates the schema itself. Lite mode needs none of
-# this — see docs/LITE.md.
+# Brings up apps/api on http://localhost:8787 and apps/realtime on ws://localhost:8788,
+# against a Postgres on 5432. Migrations run at api startup, so the first boot creates
+# the schema itself. Lite mode needs none of this — see docs/LITE.md.
 #
-# apps/realtime joins this file when it exists (ADR 0001).
+# apps/realtime is the WebSocket fan-out on 8788 (ADR 0002): it LISTENs on the same
+# Postgres and asks api to authorize every socket.
 
 services:
   postgres:
@@ -51,6 +52,29 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
+
+  realtime:
+    build:
+      context: .
+      dockerfile: apps/realtime/Dockerfile
+    environment:
+      # The same database api writes to: one LISTEN connection, plus snapshot reads
+      # for updates too large to travel as a NOTIFY payload.
+      DATABASE_URL: postgres://repofloor:repofloor@postgres:5432/repofloor
+      # Every socket is authorized by asking api, forwarding the caller's own
+      # credentials. realtime holds no credential of its own.
+      API_URL: http://api:8787
+      PORT: "8788"
+      HOST: 0.0.0.0
+      PRESENCE_TTL_MS: ${PRESENCE_TTL_MS:-90000}
+    ports:
+      - "${REALTIME_PORT:-8788}:8788"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
     restart: unless-stopped
 
 volumes:

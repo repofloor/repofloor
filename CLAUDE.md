@@ -33,7 +33,10 @@ apps/demo           Vite app; simulator.ts fakes a team + 2 agents. Also the sta
 apps/lite-action    GitHub Action. collect.ts (REST → events → replay) + main.ts. dist/index.js IS COMMITTED.
 apps/api            GitHub App webhook receiver (Full mode). Signature check → githubToEvents → reduce → GET /office/:owner/:repo.
                     Store and publisher are interfaces with in-memory impls (ADR 0001). No runtime deps.
-apps/realtime|web   Planned (Full mode). README stubs only.
+apps/realtime       ws fan-out per office. OfficeHub (no socket knowledge) + socket.ts (ws) + access.ts
+                    (authorizes by asking apps/api, forwarding the caller’s credentials). Presence is in-process,
+                    TTL’d, never persisted, and expressed as actor.upsert / actor.leave (ADR 0002).
+apps/web            Planned (Full mode). README stub only.
 docs/               ARCHITECTURE, PROTOCOL, LITE, ROADMAP, CONTRIBUTING-adjacent docs, HANDOFF
 ```
 

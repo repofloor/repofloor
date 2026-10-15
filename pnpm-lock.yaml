@@ -78,6 +78,34 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
+  apps/realtime:
+    dependencies:
+      '@repofloor/api':
+        specifier: workspace:*
+        version: link:../api
+      '@repofloor/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@repofloor/reducer':
+        specifier: workspace:*
+        version: link:../../packages/reducer
+      ws:
+        specifier: ^8.18.0
+        version: 8.22.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.2
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.15
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+
   packages/engine:
     dependencies:
       '@repofloor/protocol':
@@ -380,6 +408,9 @@ packages:
   '@types/pg@8.23.1':
     resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
 
+  '@types/ws@8.18.2':
+    resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
+
   '@webgpu/types@0.1.74':
     resolution: {integrity: sha512-lgiI4hbuLcI9unnm2cL/tvCaQU45dp0xcLWJh5uB/9MBGvIA4F8XIk7nSiBeg+K4xWGYwgZKn80LmERI5CxoTA==}
 
@@ -644,6 +675,18 @@ packages:
       yaml:
         optional: true
 
+  ws@8.22.0:
+    resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
     engines: {node: '>=0.4'}
@@ -792,6 +835,10 @@ snapshots:
       '@types/node': 22.20.5
       pg-protocol: 1.16.1
       pg-types: 2.2.0
+
+  '@types/ws@8.18.2':
+    dependencies:
+      '@types/node': 22.20.5
 
   '@webgpu/types@0.1.74': {}
 
@@ -1022,5 +1069,7 @@ snapshots:
       esbuild: 0.28.2
       fsevents: 2.3.3
       tsx: 4.23.15
+
+  ws@8.22.0: {}
 
   xtend@4.0.2: {}

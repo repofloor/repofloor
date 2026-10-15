@@ -1,6 +1,6 @@
 # Handoff — where the project stands
 
-_Last updated: 2026-10-15 (Phase 2A done: shared read check, atomic ingest, offices listing, structured logs, operations doc)._
+_Last updated: 2026-10-15 (Phase 2A and 2B done: api hardening, then apps/realtime — WebSocket fan-out, LISTEN/NOTIFY, presence)._
 
 ## Done (Phase 0)
 
@@ -68,6 +68,38 @@ _Last updated: 2026-10-15 (Phase 2A done: shared read check, atomic ingest, offi
   ADR 0001 promised, plus what every log line means.
 - 122 tests in `apps/api` (one skipped: the Postgres integration test needs `DATABASE_URL`).
 
+## Done (Phase 2B — `apps/realtime`)
+
+- [ADR 0002](adr/0002-realtime-transport.md): **WebSocket via `ws`** (Node has no WebSocket *server*; writing
+  RFC 6455 ourselves would mean maintaining frame parsing on an unauthenticated edge), **fan-out over Postgres
+  `LISTEN`/`NOTIFY`** rather than Redis, and **ephemeral presence** that needs no protocol change.
+- **B1**: `PostgresEventPublisher` / `PostgresEventSubscriber` in `apps/api`. A `NOTIFY` payload is capped at
+  8000 bytes, so a notification carries its events when they fit and a bare office id when they do not; the
+  subscriber then loads the snapshot. One dedicated `LISTEN` connection outside the pool, reconnecting with
+  backoff, and reporting a resync afterwards because it cannot know what it missed.
+- **B2**: `apps/realtime` — `ws` behind `src/socket.ts`, one channel per office, created on the first join and
+  dropped on the last leave. **Every socket is authorized by asking `apps/api`'s own `GET /office/...` with the
+  caller's credentials forwarded**, so the check that runs is A1's rather than a copy: a WebSocket cannot carry
+  an `Authorization` header, so a browser's only identity is the session cookie, and sessions stay in the api's
+  memory so no credential is ever written to the database. realtime holds no credential of its own. A refused
+  client never becomes a socket — the upgrade gets 401/404/503 and the connection is destroyed.
+- **B3**: presence with TTL. Arrival is `actor.upsert`, departure `actor.leave`, a watcher lands on `idle` —
+  no protocol change, `PROTOCOL_VERSION` unmoved. Two tabs are one person; a departure is announced only for a
+  viewer the persisted snapshot does not already know, so closing a tab never marks a contributor offline.
+  Liveness comes from the socket's own ping/pong, not from user activity.
+- `docker-compose.yml` grows a `realtime` service; `apps/realtime/Dockerfile` mirrors the api's.
+- 41 tests in `apps/realtime` (hub and presence with no network; the socket tests run real `ws` against a real
+  `node:http` server), 132 in `apps/api`. Second runtime dependency: `ws`, after `pg`.
+- One bug the tests caught: `/office/a%2Fb/c` decoded into the three-segment id `a/b/c`, which would have
+  authorized one office and joined a channel named another. Segments are now validated after decoding.
+
+## Noted, not scheduled
+
+- **Visual target** ([`docs/VISUAL_TARGET.md`](VISUAL_TARGET.md), 2026-10-15): a pixel-art reference from the
+  maintainer. Rooms as real architecture rather than tinted regions, furniture that differs by room kind, a
+  per-actor status strip and a running activity log under the canvas. Broken into a Phase 1.5 in the roadmap.
+  Phase 2 stays ahead of it.
+
 ## Not yet done / known rough edges
 
 - Speech bubbles overlap when several actors in the top desk row talk at once (needs simple collision/stagger).
@@ -75,6 +107,11 @@ _Last updated: 2026-10-15 (Phase 2A done: shared read check, atomic ingest, offi
 - `applyEffect` is called by the demo; Lite page never calls it (no live events) — fine for now.
 - No engine unit tests (visual package). A Playwright screenshot workflow is issue #16.
 - Lite `collect.ts` does not page beyond 100 commits / 50 PRs / 50 issues / 20 runs.
+- `apps/realtime`: never run against a real Postgres or a real browser. `LISTEN`/`NOTIFY` is covered against a
+  fake connection, and the sockets against `ws` — but no process has yet seen an actual `pg_notify` arrive.
+  This lands with 2D-1 (`docker compose up`).
+- `apps/realtime`: the resync after a reconnect reloads every live office at once. Fine at this scale, a
+  thundering herd at a thousand.
 - `apps/api`: sessions live in memory, so a restart signs everyone out and more than one instance needs
   sticky sessions. Deliberate — it keeps every credential out of the database — but it is the first thing to
   revisit when the service is run in more than one place.

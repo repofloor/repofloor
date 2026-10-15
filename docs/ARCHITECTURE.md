@@ -69,7 +69,7 @@ PR reviews spawn transient meeting rooms.
 | Service | Responsibility | Notes |
 |---|---|---|
 | `apps/api` | Verify webhook signatures, `githubToEvents`, persist, publish | Shipped: Postgres store (in-memory without `DATABASE_URL`), reads authorized against GitHub repo access. Idempotent on delivery id; periodic full resync per office |
-| `apps/realtime` | WebSocket fan-out per office, presence (TTL in Redis), rooms, chat | Presence is never written to Postgres |
+| `apps/realtime` | WebSocket fan-out per office, presence with TTL; rooms and chat later | Presence is in-process and never written to Postgres. Every socket is authorized by asking `apps/api` with the caller’s own credentials forwarded, so the check that runs is the one behind `GET /office/...` and not a copy ([ADR 0002](adr/0002-realtime-transport.md)) |
 | `apps/web` | Buildings list, office view (engine), profile (emoji, agent tokens) | Thin; most logic is in packages |
 
 Storage: Postgres (installations, rooms, profiles, agent tokens, 7-day chat). Decided in

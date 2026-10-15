@@ -85,8 +85,8 @@ packages/reducer     GitHub/agent events → OfficeState, pure & deterministic  
 packages/engine      Pixi.js renderer: desks, rooms, avatars, animations
 apps/demo            The engine running on a simulated event stream; also the static page Lite publishes
 apps/lite-action     GitHub Action: REST snapshot → office-state.json + static page
-apps/api             (planned) GitHub App webhooks, REST                        → docs/ARCHITECTURE.md
-apps/realtime        (planned) WebSocket presence, rooms, chat, agent telemetry
+apps/api             GitHub App webhooks, snapshots, sign-in                     → docs/ARCHITECTURE.md
+apps/realtime        WebSocket fan-out per office, presence                      → docs/adr/0002-realtime-transport.md
 apps/web             (planned) hosted UI: buildings, offices, settings
 docs/                Architecture, roadmap, contributing
 ```
