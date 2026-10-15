@@ -41,13 +41,13 @@ Ordered: each sub-phase unblocks the next. 2A is prerequisites the later ones ne
       and not a copy — session cookie *or* bearer token as the identity
 - [x] **B3** Presence with TTL
 
-### 2C — `apps/web`
-- [ ] **C1** Office page: mount the engine against `GET /office/:owner/:repo`
-- [ ] **C2** Sign-in and install landing — turns `/auth/install/callback`'s JSON into a page
+### 2C — `apps/web` ✅
+- [x] **C1** Office page: mount the engine against `GET /office/:owner/:repo`
+- [x] **C2** Sign-in and install landing — turns `/auth/install/callback`'s JSON into a page
       (pass `return_to`), `/auth/me` decides what to show
-- [ ] **C3** Buildings → offices → office navigation
-- [ ] **C4** Live: subscribe to the 2B socket, feed `applyEffect`
-- [ ] Profile: choose your emoji
+- [x] **C3** Buildings → offices → office navigation, including `partial` said out loud
+- [x] **C4** Live: subscribe to the 2B socket, feed `applyEffect`
+- [ ] Profile: choose your emoji — needs a write route on the api, so it waits for 2D
 
 ### 2D — Run it for real
 - [ ] **D1** `docker compose up --build` on a machine with Docker; add `realtime` to the file
@@ -63,9 +63,11 @@ Ordered: each sub-phase unblocks the next. 2A is prerequisites the later ones ne
 Pinned reference and the full reading: [VISUAL_TARGET](VISUAL_TARGET.md). Cheapest first;
 none of it is scheduled, and Phase 2 stays ahead of it.
 
-- [ ] Per-actor status strip under the canvas (name · emoji · what they are doing) — also
-      most of #15, the accessibility text alternative
-- [ ] Running activity log of recent events, which is what makes the page readable on a phone
+- [x] Per-actor status strip under the canvas (name · emoji · what they are doing) — also
+      most of #15, the accessibility text alternative. Done in `apps/web` (2C); the Lite
+      page in `apps/demo` still has neither
+- [x] Running activity log of recent events, which is what makes the page readable on a phone.
+      Same: `apps/web` only, and `apps/demo` could lift `src/describe.ts` wholesale
 - [ ] Rooms as architecture: interior walls, doorways, a corridor — not tinted regions
 - [ ] Furniture parameterised by room kind (meeting table, sofa, plants), still procedural
 - [ ] Palette pass: desaturated furniture, colour reserved for people

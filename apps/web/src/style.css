@@ -1,0 +1,710 @@
+/*
+ * The page around the canvas.
+ *
+ * Dark only, and that is a decision rather than an omission: the engine's palette
+ * (`packages/engine/src/palette.ts`) is a dark office with colour reserved for people,
+ * the canvas background is opaque, and a light page around a dark floor would look
+ * like a bug. The tokens below are the demo's colours, named — so the two pages that
+ * show the same office look like the same product.
+ *
+ * Everything is mobile-first: the base rules are the narrow layout and `min-width`
+ * queries widen it. The floor is the only page that changes shape.
+ */
+
+:root {
+  color-scheme: dark;
+
+  --bg: #0f1116;
+  --bg-raised: #161a22;
+  --bg-sunken: #0b0d12;
+  --fg: #e8ebf2;
+  --fg-dim: #9aa3b5;
+  --fg-faint: #6b7385;
+  --border: #262a35;
+  --border-strong: #343a48;
+  --accent: #7dd3a7;
+  --accent-ink: #06130c;
+  --busy: #7dd3a7;
+  --idle: #9aa3b5;
+  --away: #4d5466;
+  --danger: #e2737b;
+  --warn: #e0b267;
+
+  /* 4-based spacing scale. No in-between values. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+
+  /* One family, differentiated by weight and size — the office is monospace art. */
+  --font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --t-xs: 11px;
+  --t-sm: 12px;
+  --t-md: 13px;
+  --t-lg: 17px;
+  --t-xl: 22px;
+
+  --radius: 6px;
+  --radius-pill: 999px;
+  --tap: 44px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: var(--t-md) / 1.6 var(--font);
+  display: flex;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: var(--s2);
+  padding: var(--s2) var(--s3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  z-index: 10;
+}
+
+.skip:focus {
+  left: var(--s2);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.top {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--fg);
+  font-size: var(--t-lg);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.brand:hover {
+  text-decoration: none;
+}
+
+.brand__glyph {
+  font-size: var(--t-lg);
+}
+
+.top__blurb {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: var(--t-sm);
+  max-width: 65ch;
+}
+
+.top__account {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s3);
+}
+
+.account {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--fg-dim);
+}
+
+.account__avatar {
+  border-radius: var(--radius-pill);
+  display: block;
+}
+
+.account__login {
+  color: var(--fg);
+}
+
+.account__hint {
+  color: var(--fg-faint);
+  font-size: var(--t-xs);
+  max-width: 34ch;
+}
+
+@media (min-width: 900px) {
+  .top {
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: var(--s5);
+  }
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: 0 var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font: 600 var(--t-md) / 1 var(--font);
+  cursor: pointer;
+  transition: background 150ms ease-out, border-color 150ms ease-out, transform 150ms ease-out;
+}
+
+.button:hover {
+  background: #1d2230;
+  text-decoration: none;
+}
+
+.button:active {
+  transform: translateY(1px);
+}
+
+/* Exactly one filled button per screen; everything else is quiet. */
+.button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.button--primary:hover {
+  background: #96e2bc;
+}
+
+.button--quiet {
+  min-height: 32px;
+  padding: 0 var(--s3);
+  font-weight: 400;
+  color: var(--fg-dim);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+/* ── Page furniture ─────────────────────────────────────────────────────── */
+
+main {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--s5) var(--s4);
+}
+
+main:focus {
+  outline: none;
+}
+
+.crumbs {
+  color: var(--fg-faint);
+  font-size: var(--t-xs);
+  margin-bottom: var(--s2);
+}
+
+.page-head {
+  margin-bottom: var(--s5);
+}
+
+.page-head__title {
+  margin: 0 0 var(--s1);
+  font-size: var(--t-xl);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.page-head__blurb {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: var(--t-sm);
+  max-width: 65ch;
+}
+
+.section__title {
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-dim);
+  margin: var(--s6) 0 var(--s3);
+}
+
+.notice {
+  margin: 0 0 var(--s4);
+  padding: var(--s3) var(--s4);
+  border-left: 3px solid var(--warn);
+  background: var(--bg-raised);
+  color: var(--fg-dim);
+  font-size: var(--t-sm);
+  max-width: 80ch;
+}
+
+.steps {
+  margin: 0 0 var(--s6);
+  padding-left: var(--s5);
+  color: var(--fg-dim);
+  font-size: var(--t-sm);
+  max-width: 70ch;
+}
+
+.steps li + li {
+  margin-top: var(--s2);
+}
+
+/* ── Cards: buildings and offices ───────────────────────────────────────── */
+
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s3);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .cards {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
+}
+
+@media (min-width: 1400px) {
+  .cards {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
+}
+
+.card {
+  padding: var(--s4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 150ms ease-out;
+}
+
+.card:hover {
+  border-color: var(--border-strong);
+}
+
+.card__link {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 28px;
+  color: var(--fg);
+  font-size: var(--t-lg);
+  font-weight: 700;
+}
+
+.card__glyph {
+  font-size: var(--t-md);
+}
+
+.card__meta {
+  margin: var(--s2) 0 0;
+  color: var(--fg-dim);
+  font-size: var(--t-xs);
+}
+
+.card__meta--dim {
+  color: var(--fg-faint);
+}
+
+/* ── Empty / error / loading ────────────────────────────────────────────── */
+
+.state {
+  max-width: 68ch;
+  padding: var(--s5);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+}
+
+.state--error {
+  border-left-color: var(--danger);
+}
+
+.state__title {
+  margin: 0 0 var(--s2);
+  font-size: var(--t-lg);
+}
+
+.state__body {
+  margin: 0 0 var(--s4);
+  color: var(--fg-dim);
+}
+
+.state__hint {
+  margin: var(--s3) 0 0;
+  color: var(--fg-faint);
+  font-size: var(--t-xs);
+}
+
+.skeleton {
+  display: grid;
+  gap: var(--s3);
+}
+
+.skeleton__row {
+  height: 76px;
+  border-radius: var(--radius);
+  background: linear-gradient(90deg, var(--bg-raised) 0%, #1d222c 50%, var(--bg-raised) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1200ms linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ── The floor ──────────────────────────────────────────────────────────── */
+
+.floor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  min-height: 0;
+}
+
+.floor__head {
+  flex: 0 0 auto;
+}
+
+.floor__head .page-head {
+  margin-bottom: var(--s3);
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s4);
+  padding: var(--s2) 0;
+  font-size: var(--t-xs);
+  color: var(--fg-dim);
+  border-top: 1px solid var(--border);
+}
+
+.bar__item--dim {
+  color: var(--fg-faint);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s3);
+  border-radius: var(--radius-pill);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  font-size: var(--t-xs);
+  cursor: help;
+}
+
+.pill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--fg-faint);
+}
+
+.pill--live {
+  color: var(--accent);
+  border-color: #2c5b43;
+}
+
+.pill--live .pill__dot {
+  background: var(--accent);
+  animation: breathe 2400ms ease-in-out infinite;
+}
+
+.pill--connecting .pill__dot,
+.pill--retry .pill__dot {
+  background: var(--warn);
+}
+
+.pill--retry {
+  color: var(--warn);
+}
+
+.pill--off {
+  color: var(--fg-faint);
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.floor__body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s4);
+  min-height: 0;
+}
+
+.floor__stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+/*
+ * The canvas box must have a *definite* height at every width. Pixi's `resizeTo` sizes
+ * the canvas from this element, and the canvas is its only child — so an `auto` or
+ * flex-grown height here feeds back on itself and the floor grows without bound
+ * (observed: a 6500px canvas). Hence `vh`, never `flex: 1`.
+ */
+.floor__canvas {
+  position: relative;
+  overflow: hidden;
+  height: 52vh;
+  min-height: 260px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.floor__affordance {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--t-xs);
+}
+
+.floor__side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.floor__heading {
+  margin: var(--s3) 0 0;
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-dim);
+}
+
+.floor__hint {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--t-xs);
+  max-width: 60ch;
+}
+
+@media (min-width: 1000px) {
+  main {
+    padding: var(--s5);
+  }
+
+  .floor__body {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    align-items: start;
+  }
+
+  /* Still definite: the head above it is about 300px of chrome. */
+  .floor__canvas {
+    height: calc(100vh - 300px);
+    min-height: 380px;
+  }
+
+  .floor__side {
+    max-height: calc(100vh - 276px);
+    overflow-y: auto;
+    padding-left: var(--s4);
+    border-left: 1px solid var(--border);
+  }
+}
+
+@media (min-width: 1500px) {
+  .floor__body {
+    grid-template-columns: minmax(0, 1fr) 420px;
+  }
+}
+
+/* ── Status strip (VISUAL_TARGET item 3, and most of issue #15) ─────────── */
+
+.strip {
+  list-style: none;
+  margin: 0 0 var(--s3);
+  padding: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.strip__row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: var(--s1) var(--s2);
+  padding: var(--s2);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  border-left: 2px solid var(--away);
+}
+
+.strip__row--busy {
+  border-left-color: var(--busy);
+}
+
+.strip__row--idle {
+  border-left-color: var(--idle);
+}
+
+.strip__row--away {
+  opacity: 0.6;
+}
+
+.strip__icon {
+  grid-row: span 2;
+  text-align: center;
+  font-size: var(--t-sm);
+}
+
+.strip__who {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+.strip__name {
+  color: var(--fg);
+  font-weight: 700;
+  font-size: var(--t-sm);
+}
+
+.tag {
+  padding: 0 var(--s1);
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--fg-faint);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.strip__what {
+  color: var(--fg-dim);
+  font-size: var(--t-xs);
+  min-width: 0;
+}
+
+.strip__room {
+  color: var(--accent);
+}
+
+.strip__detail {
+  color: var(--fg-faint);
+}
+
+.strip__empty,
+.log__empty {
+  padding: var(--s3);
+  color: var(--fg-faint);
+  font-size: var(--t-xs);
+  background: var(--bg-raised);
+  border-radius: var(--radius);
+  list-style: none;
+}
+
+/* ── Activity log (VISUAL_TARGET item 4) ────────────────────────────────── */
+
+.log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+
+.log__line {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: var(--s2);
+  padding: var(--s2) 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: var(--t-xs);
+  color: var(--fg-dim);
+}
+
+.log__at {
+  color: var(--fg-faint);
+}
+
+.log__who {
+  color: var(--fg);
+  margin-right: var(--s1);
+}
+
+.log__said {
+  min-width: 0;
+}
+
+/* ── Motion ─────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* No floor to show: the error gets the width the canvas would have had. */
+.floor__body--alone {
+  grid-template-columns: minmax(0, 1fr);
+}

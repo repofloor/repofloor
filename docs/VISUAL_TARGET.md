@@ -52,7 +52,11 @@ that updates in a second.
 
 Candidates when it is time, cheapest first:
 
-- the status-chip strip and the activity log (no engine change, and #15 falls out)
+- ~~the status-chip strip and the activity log (no engine change, and #15 falls out)~~ —
+  done in `apps/web` with Phase 2C (`src/describe.ts` is pure and DOM-free, so the Lite
+  page in `apps/demo` can lift it as it is). Items 5 and 6 came with it: the office page
+  has a status bar with a live indicator and a clock, and it finally tells people that
+  they can click a person, drag to pan and scroll to zoom
 - room walls and doorways in `computeLayout`
 - furniture parameterised by room kind
 - palette pass

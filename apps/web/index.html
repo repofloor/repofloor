@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Repofloor — a living pixel office for every GitHub repository." />
+    <title>Repofloor</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#view">Skip to content</a>
+    <header class="top">
+      <a class="brand" href="/">
+        <span class="brand__glyph" aria-hidden="true">🏢</span>
+        <span class="brand__name">repofloor</span>
+      </a>
+      <p class="top__blurb">Your repositories as an office floor: who is coding, reviewing, blocked or away, live.</p>
+      <div class="top__account" id="account"></div>
+    </header>
+    <main id="view" tabindex="-1"></main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

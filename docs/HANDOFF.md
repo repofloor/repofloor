@@ -1,6 +1,6 @@
 # Handoff — where the project stands
 
-_Last updated: 2026-10-15 (Phase 2A and 2B done: api hardening, then apps/realtime — WebSocket fan-out, LISTEN/NOTIFY, presence)._
+_Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realtime`, then `apps/web` — the hosted UI, live on the socket)._
 
 ## Done (Phase 0)
 
@@ -93,12 +93,56 @@ _Last updated: 2026-10-15 (Phase 2A and 2B done: api hardening, then apps/realti
 - One bug the tests caught: `/office/a%2Fb/c` decoded into the three-segment id `a/b/c`, which would have
   authorized one office and joined a channel named another. Segments are now validated after decoding.
 
+## Done (Phase 2C — `apps/web`)
+
+- The hosted UI, **Vite + TypeScript, no framework**: four pages (`/`, `/:owner`, `/:owner/:repo`,
+  `/installed`), history routing, and a `<main>` the router swaps. ARCHITECTURE calls this app thin and
+  it is: the pages are DOM, the behaviour is in the packages.
+- **C1** The office page mounts `@repofloor/engine` against `GET /office/:owner/:repo`, in the shape
+  `apps/demo` already used — `setState` for state, `applyEffect` for events, local `decay` between
+  arrivals. Rule 1 holds: nothing but `OfficeState` and `OfficeEvent` reaches the renderer, which is
+  why the same renderer still draws the Lite page from a static file.
+- **C2** Sign-in behind a button (`/auth/github?return_to=…`), `/auth/me` at boot deciding the header
+  and the empty states, `POST /auth/logout`, and `/installed` — a real page for what
+  `/auth/install/callback` answers as JSON. Point the App's Setup URL at
+  `/auth/install/callback?return_to=/installed`.
+- **C3** Buildings → offices → office, all three from one `GET /offices`. `partial: true` renders as a
+  notice saying the list is short and why, rather than looking complete.
+- **C4** The 2B socket: `hello` is what turns the indicator live (not the open event), `snapshot`
+  replaces state wholesale, `events` animate and are reduced locally with the same pure `reduce` the
+  server ran — otherwise the strip and the log would drift from the canvas. Reconnect is exponential
+  with ±25% jitter (every page watching an office loses its socket in the same instant); `4001`/`4004`/
+  `4003` end the loop, because retrying a refusal only makes the api authorize us again.
+- **Two items of `docs/VISUAL_TARGET.md` fell out**, both DOM rather than engine work: the per-actor
+  status strip (`name · emoji · what they are doing`, busiest first) and the running activity log. Together
+  they are most of issue #15 — the office in words, in the DOM rather than inside a WebGL context.
+  `src/describe.ts` is pure and has no DOM import, so `apps/demo` can lift it as it is.
+- **No second ACL anywhere in it** (rule 6): a `401` offers sign-in, a `404` says "does not exist, or is
+  not yours" without claiming which, and `GET /offices` is taken at its word. The page holds no
+  credential; the token stays in the api's memory.
+- **One origin.** The api, the socket and these files are behind one reverse proxy, which routes
+  `/office/...` by the `Upgrade` header. Not a preference: the session cookie is `HttpOnly`,
+  `SameSite=Lax`, so a cross-site `fetch` would not carry it and the page would be permanently signed
+  out. `apps/web/README.md` has the proxy table.
+- `scripts/fake-services.mjs` (`pnpm --filter @repofloor/web dev:fake`) answers the four routes and
+  speaks the wire format with a seeded office and a trickle of events, so the page can be worked on
+  without Postgres, a GitHub App or a tunnel. A fixture, not a second implementation — the snapshot is
+  built by the real reducer out of real events. It authorizes nothing.
+- 45 tests in `apps/web`, all DOM-free: routing, url building, frame parsing (including a snapshot from
+  a future protocol major, which is refused rather than rendered), the strip and log wording over every
+  event variant, the api's failure mapping, and the socket's state machine against a fake socket.
+- Verified in the browser against the fixture at 360px and at 1024px: the floor renders, events arrive
+  live, the strip reorders, the log fills, and the 404 page is the error state rather than an empty canvas.
+  One real bug came out of looking: a flex-grown canvas box feeds back into Pixi's `resizeTo` and the
+  floor grew to 6500px. The canvas height is `vh`-based and definite at every width now.
+
 ## Noted, not scheduled
 
 - **Visual target** ([`docs/VISUAL_TARGET.md`](VISUAL_TARGET.md), 2026-10-15): a pixel-art reference from the
   maintainer. Rooms as real architecture rather than tinted regions, furniture that differs by room kind, a
   per-actor status strip and a running activity log under the canvas. Broken into a Phase 1.5 in the roadmap.
-  Phase 2 stays ahead of it.
+  Phase 2 stays ahead of it. The last two items landed in `apps/web` with 2C; the engine-side ones (walls,
+  doorways, furniture by room kind, the palette pass) are untouched and are the larger half.
 
 ## Not yet done / known rough edges
 
@@ -118,18 +162,29 @@ _Last updated: 2026-10-15 (Phase 2A and 2B done: api hardening, then apps/realti
 - `apps/api`: the sign-in flow has never been run against the real github.com. Everything is covered against
   a faked GitHub; creating the App and walking the redirect once is still owed.
 - `monitors` map redraw happens per `setState` for every actor — cheap, but could be diffed.
+- `apps/web`: never run against the real `apps/api` or `apps/realtime` — only against its own fixture.
+  It is written to the routes and the wire format as they are in this repo, but 2D-1 is where that is proven.
+- `apps/web`: `src/wire.ts` is a hand-kept copy of the client half of `apps/realtime/src/wire.ts`, because a
+  browser bundle must not depend on a server package. Every frame is validated, so drift degrades to "frame
+  ignored" rather than a broken page — but it is drift that nothing checks.
+- `apps/web`: no light theme, deliberately (the engine's floor is dark and opaque), and no localization yet
+  (Phase 1 lists tr/en). The strip and the log are English strings in `src/describe.ts`.
+- `apps/web`: the office page polls nothing. If the socket is refused, the snapshot is whatever the first
+  `GET` returned and it ages in place — correct, but a Lite-style poll would be a cheap fallback.
+- `apps/demo` still has no status strip and no activity log; `src/describe.ts` is pure and could be lifted.
 
 ## Immediate next steps (suggested order)
 
 The remaining Full-mode work is phased in [`docs/ROADMAP.md`](ROADMAP.md) as **2A → 2B → 2C → 2D**,
 and each sub-phase there is lettered (A1, A2, …). This list says only where we are in it:
 
-1. **2A — `apps/api` hardening**, in progress. A1 lifts the read check out of `handleOffice`
+1. ~~**2A — `apps/api` hardening**~~, done. A1 lifts the read check out of `handleOffice`
    (2B's socket needs the identical check), A2 makes ingest atomic, A3 clears the operational
    leftovers. Nothing in 2B/2C should start before A1.
-2. **2B — `apps/realtime`**, then **2C — `apps/web`**, then **2D — run it against the real GitHub
-   and a real Docker host**. D2 matters more than it looks: no part of the sign-in flow has ever
-   met github.com.
+2. ~~**2B — `apps/realtime`**, then **2C — `apps/web`**~~ — both done. Next is **2D — run it against
+   the real GitHub and a real Docker host**, and D1 now has a web service to add to
+   `docker-compose.yml` beside api and realtime. D2 matters more than it looks: no part of the
+   sign-in flow has ever met github.com, and `apps/web` has only ever met its own fixture.
 3. Phase 1 polish (bubble stagger, A* walking #5, night tint #4, text alternative #15) is
    deliberately *not* in this queue — those are the `good first issue` set, left for contributors.
    Take one only if it ages without a taker.

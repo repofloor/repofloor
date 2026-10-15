@@ -9,7 +9,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "pnpm --filter @repofloor/protocol run build && pnpm --filter @repofloor/reducer run build && pnpm --filter @repofloor/engine run build && pnpm --filter @repofloor/demo run build && pnpm --filter @repofloor/lite-action run build && pnpm --filter @repofloor/api run build && pnpm --filter @repofloor/realtime run build",
+    "build": "pnpm --filter @repofloor/protocol run build && pnpm --filter @repofloor/reducer run build && pnpm --filter @repofloor/engine run build && pnpm --filter @repofloor/demo run build && pnpm --filter @repofloor/lite-action run build && pnpm --filter @repofloor/web run build && pnpm --filter @repofloor/api run build && pnpm --filter @repofloor/realtime run build",
     "dev": "pnpm --filter @repofloor/demo dev",
     "test": "pnpm -r run test",
     "lint": "pnpm -r run lint",

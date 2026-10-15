@@ -87,7 +87,7 @@ apps/demo            The engine running on a simulated event stream; also the st
 apps/lite-action     GitHub Action: REST snapshot → office-state.json + static page
 apps/api             GitHub App webhooks, snapshots, sign-in                     → docs/ARCHITECTURE.md
 apps/realtime        WebSocket fan-out per office, presence                      → docs/adr/0002-realtime-transport.md
-apps/web             (planned) hosted UI: buildings, offices, settings
+apps/web             hosted UI: buildings → offices → office, live on the 2B socket
 docs/                Architecture, roadmap, contributing
 ```
 

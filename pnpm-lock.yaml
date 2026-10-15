@@ -106,6 +106,34 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
+  apps/web:
+    dependencies:
+      '@repofloor/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+      '@repofloor/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@repofloor/reducer':
+        specifier: workspace:*
+        version: link:../../packages/reducer
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.15
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vite:
+        specifier: ^8.3.4
+        version: 8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15)
+      ws:
+        specifier: ^8.18.0
+        version: 8.22.0
+
   packages/engine:
     dependencies:
       '@repofloor/protocol':

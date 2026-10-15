@@ -93,6 +93,19 @@ explains *why*; the doc explains *what*. Append, don't rewrite.
   `actor.leave` on departure (only for viewers GitHub activity does not already place in the office), `idle` for
   someone merely watching. It says who is here, never for how long — rule 6 and the line above it.
 
+- **2026-10-15 · `apps/web` is one origin with the api, and decides nothing about access** (Phase 2C).
+  The hosted UI is Vite + TypeScript with no framework: four pages, and the contract is already
+  `@repofloor/protocol`. Two things about it were decided rather than inherited. First, it is served from the
+  **same hostname** as `apps/api` and `apps/realtime`, behind one reverse proxy that routes `/office/...` by the
+  `Upgrade` header — a socket to realtime, a GET to the api. That follows from ADR 0002: a browser's only identity
+  is an `HttpOnly`, `SameSite=Lax` cookie, which a cross-site request would simply not carry, so a separately
+  hosted front end would be permanently signed out. Second, the page holds **no opinion about who may read what**.
+  It renders the api's answer: a 401 offers sign-in, and a 404 says "does not exist, or is not yours" without
+  claiming which, because the api refuses to distinguish them and a page that guessed would leak exactly what
+  that refusal protects. The same reasoning makes `partial` from `GET /offices` visible rather than swallowed.
+  Two items of the visual target came along for free, since they are DOM and not engine work: the per-actor status
+  strip and the activity log beside the canvas, which together are most of issue #15.
+
 ## Open questions (for the next conversation)
 
 - ~~Visual style: pixel-art (current) was chosen implicitly by the prototype; isometric/modern was offered and not decided.~~

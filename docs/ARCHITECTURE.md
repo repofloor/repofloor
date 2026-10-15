@@ -70,7 +70,7 @@ PR reviews spawn transient meeting rooms.
 |---|---|---|
 | `apps/api` | Verify webhook signatures, `githubToEvents`, persist, publish | Shipped: Postgres store (in-memory without `DATABASE_URL`), reads authorized against GitHub repo access. Idempotent on delivery id; periodic full resync per office |
 | `apps/realtime` | WebSocket fan-out per office, presence with TTL; rooms and chat later | Presence is in-process and never written to Postgres. Every socket is authorized by asking `apps/api` with the caller’s own credentials forwarded, so the check that runs is the one behind `GET /office/...` and not a copy ([ADR 0002](adr/0002-realtime-transport.md)) |
-| `apps/web` | Buildings list, office view (engine), profile (emoji, agent tokens) | Thin; most logic is in packages |
+| `apps/web` | Buildings list, office view (engine), status strip and activity log; profile later | Shipped (2C): Vite + TypeScript, no framework. Served from the **same origin** as api and realtime — the session cookie is `SameSite=Lax`, and `/office/...` is routed by the `Upgrade` header (socket → realtime, GET → api). Decides nothing about access: it renders the api's answer |
 
 Storage: Postgres (installations, rooms, profiles, agent tokens, 7-day chat). Decided in
 [ADR 0001](adr/0001-full-mode-stack.md): self-hosted services on **plain** Postgres,
