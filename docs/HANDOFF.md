@@ -46,8 +46,8 @@ _Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realti
   signed `installation` delivery; installation tokens are minted from the private key (RS256 JWT via
   `node:crypto`) and cached **in memory**, so the database holds no credential at all. Still no new runtime
   dependency — `pg` remains the only one.
-- `docker-compose.yml` + `apps/api/Dockerfile`: `WEBHOOK_SECRET=dev-secret docker compose up --build` brings up
-  api + Postgres. Written but not run — no Docker daemon on the machine that wrote it.
+- `docker-compose.yml` + Dockerfiles: `WEBHOOK_SECRET=dev-secret docker compose up --build` brings up
+  Postgres + api + realtime. **Run for real on 2026-10-15** (2D-1) — see below.
 - 91 tests in `apps/api` (one skipped: the Postgres integration test runs only with `DATABASE_URL` set).
   No live GitHub and no live database in CI: GitHub is faked, and the App JWT is verified against a keypair
   generated inside the test.
@@ -135,6 +135,26 @@ _Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realti
   live, the strip reorders, the log fills, and the 404 page is the error state rather than an empty canvas.
   One real bug came out of looking: a flex-grown canvas box feeds back into Pixi's `resizeTo` and the
   floor grew to 6500px. The canvas height is `vh`-based and definite at every width now.
+## Done (Phase 2D-1 — the stack, actually running)
+
+- `docker compose up --build` brought up Postgres + api + realtime on 2026-10-15. Two things it revealed
+  that no amount of reading would have:
+  - **There was no `.dockerignore`.** Every Dockerfile installs from the lockfile and then copies sources,
+    so that copy dropped the host’s `node_modules` on top of the one just installed. On Windows those are
+    junctions into the host pnpm store, so the build died with `Cannot find module .../typescript/bin/tsc`.
+    On Linux it would have *succeeded*, silently, with whatever the developer happened to have — the worse
+    failure. Added, and it also cuts the build context down to almost nothing.
+  - Publishing Postgres on 5432 collides with a local one. `POSTGRES_PORT` already existed for this;
+    documented rather than changed, since nothing inside the stack uses the published port.
+- **`pnpm smoke`** ([`scripts/smoke.mjs`](../scripts/smoke.mjs)): 12 checks against a running stack, all
+  passing. The one that matters is *a webhook reaching a live WebSocket through `pg_notify`* — the first
+  time that chain has run outside a test double. It also pins the authorization properties against the real
+  thing: unsigned deliveries refused, a private office refused on both doors, and its name absent from
+  `GET /offices`.
+- **The documented restore was run** and does what `docs/OPERATIONS.md` claims: a single `pg_restore`
+  brought back a deliberately deleted office. The api can stay up through it (the drop/recreate is one
+  transaction, pooled connections survive), and `LISTEN` survives too — the channel belongs to the session,
+  not the schema.
 
 ## Noted, not scheduled
 
@@ -151,9 +171,6 @@ _Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realti
 - `applyEffect` is called by the demo; Lite page never calls it (no live events) — fine for now.
 - No engine unit tests (visual package). A Playwright screenshot workflow is issue #16.
 - Lite `collect.ts` does not page beyond 100 commits / 50 PRs / 50 issues / 20 runs.
-- `apps/realtime`: never run against a real Postgres or a real browser. `LISTEN`/`NOTIFY` is covered against a
-  fake connection, and the sockets against `ws` — but no process has yet seen an actual `pg_notify` arrive.
-  This lands with 2D-1 (`docker compose up`).
 - `apps/realtime`: the resync after a reconnect reloads every live office at once. Fine at this scale, a
   thundering herd at a thousand.
 - `apps/api`: sessions live in memory, so a restart signs everyone out and more than one instance needs

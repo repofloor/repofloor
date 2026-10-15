@@ -50,7 +50,8 @@ Ordered: each sub-phase unblocks the next. 2A is prerequisites the later ones ne
 - [ ] Profile: choose your emoji — needs a write route on the api, so it waits for 2D
 
 ### 2D — Run it for real
-- [ ] **D1** `docker compose up --build` on a machine with Docker; add `realtime` to the file
+- [x] **D1** `docker compose up --build` on a machine with Docker; add `realtime` to the file
+      — run 2026-10-15. It needed a `.dockerignore`; `pnpm smoke` now covers the whole chain.
 - [ ] **D2** Create the App on github.com and walk webhook + sign-in once against the real thing
       (everything so far is covered only against a faked GitHub)
 - [ ] **D3** Periodic resync as the App: mint an installation token, rebuild an office from REST

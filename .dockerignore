@@ -1,0 +1,46 @@
+# What must never reach a build context.
+#
+# `node_modules` is the one that matters. Every Dockerfile here installs dependencies
+# from the lockfile and *then* copies sources; without this file that copy drops the
+# host's `node_modules` on top of the one just installed. On Windows those are
+# junctions into the host pnpm store, so they resolve to nothing inside the image and
+# the build fails with "Cannot find module .../typescript/bin/tsc". On Linux they
+# resolve to the wrong thing, which is worse — it builds, with whatever the developer
+# happened to have.
+#
+# It is also most of the build context by size, so this is the difference between a
+# second and a minute before anything starts.
+
+node_modules
+**/node_modules
+
+# Build output. Every image builds its own from source.
+dist
+**/dist
+*.tsbuildinfo
+
+# Not ignored on purpose: apps/lite-action/dist is committed (CLAUDE.md rule 4), but no
+# image builds the Action, so the pattern above costs nothing.
+
+.git
+.github
+.vscode
+.idea
+
+# Local environment and anything that could carry a secret into an image layer.
+.env
+.env.*
+*.pem
+*.key
+
+# Docs, fixtures and screenshots: not needed to run a service.
+docs
+*.md
+!apps/*/README.md
+
+# Test and tooling noise.
+coverage
+.nyc_output
+*.log
+.DS_Store
+Thumbs.db

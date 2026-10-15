@@ -8,6 +8,34 @@ with eyes open: "operations are ours". It named three things that had to exist f
 to be an honest choice — a managed database, **a documented single-command restore**,
 and **structured logs** in place of a dashboard. Both of ours are below.
 
+## Bringing the stack up
+
+```bash
+WEBHOOK_SECRET=dev-secret docker compose up --build -d
+WEBHOOK_SECRET=dev-secret pnpm smoke
+```
+
+`pnpm smoke` ([`scripts/smoke.mjs`](../scripts/smoke.mjs)) drives the whole chain
+against the running stack: an unsigned delivery is refused, a signed one is reduced and
+saved, the snapshot reads back, a re-delivery applies nothing, a WebSocket is greeted
+with `hello` + `snapshot`, **a webhook reaches that live socket through `pg_notify`**,
+and a private office is refused on both doors without leaking its name into `/offices`.
+
+The unit suites cover each piece against fakes; this covers the wiring between them,
+which is the part fakes cannot. Run it after `docker compose up`, on a new host, or
+after changing anything about how the services find each other. It writes two offices
+into whatever database the stack points at, so never point it at production.
+
+If port 5432 is already taken on the host — a local Postgres, usually — the compose run
+fails with `Bind for 127.0.0.1:5432 failed`. Publish it somewhere else:
+
+```bash
+WEBHOOK_SECRET=dev-secret POSTGRES_PORT=55432 docker compose up --build -d
+```
+
+Nothing inside the stack cares: `api` and `realtime` reach Postgres over the compose
+network on 5432 regardless. The published port is only for `psql` from the host.
+
 ## Backup and restore
 
 The database holds exactly two kinds of thing, and neither is a credential:
@@ -60,8 +88,17 @@ docker compose exec -T postgres pg_dump --format=custom --no-owner -U repofloor 
 docker compose exec -T postgres pg_restore --clean --if-exists --no-owner -U repofloor -d repofloor < /tmp/repofloor.dump
 ```
 
-> Not yet run end to end — `docker compose up --build` is still owed on a machine with a
-> Docker daemon (roadmap 2D-1). Treat the block above as the intended shape until then.
+Run for real on 2026-10-15 (roadmap 2D-1), against the compose stack. The restore
+replaced a deliberately deleted office and reported nothing. Two things we learned by
+doing it rather than by reasoning about it:
+
+- **The api can stay up.** `--clean --if-exists` drops and recreates the tables inside
+  one transaction; existing pooled connections survive it, and the smoke test passed
+  immediately afterwards. Stopping the api first is still the advice — a delivery
+  arriving mid-restore writes a row the restore then drops — but it is about not losing
+  that one delivery, not about the restore failing.
+- **`LISTEN` survives it too.** The channel is a property of the session, not of the
+  schema, so `apps/realtime` does not notice.
 
 ## Logs
 
