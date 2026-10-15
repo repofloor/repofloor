@@ -34,3 +34,4 @@ export {
   type OfficeUpdate,
 } from "./publisher.js";
 export { SIGNATURE_HEADER, signWebhook, verifyWebhookSignature } from "./signature.js";
+export { KeyedQueue } from "./serialize.js";

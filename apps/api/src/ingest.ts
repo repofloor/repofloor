@@ -10,6 +10,7 @@ import { emptyOfficeState, type Building, type Office, type OfficeEvent, type Of
 import { githubToEvents, reduce, type GithubWebhook } from "@repofloor/reducer";
 import type { OfficeStore } from "./store.js";
 import type { EventPublisher } from "./publisher.js";
+import { KeyedQueue } from "./serialize.js";
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (typeof v === "object" && v !== null ? (v as Obj) : {});
@@ -63,18 +64,46 @@ export interface IngestResult {
 export interface IngestDeps {
   store: OfficeStore;
   publisher: EventPublisher;
+  /** Serializes deliveries per office; one per store is created on demand. */
+  queue?: KeyedQueue;
+}
+
+/**
+ * The queue belongs to the store it protects, so a direct `ingestWebhook` call is as
+ * safe as one through the HTTP handler and two stores never block each other.
+ */
+const queues = new WeakMap<OfficeStore, KeyedQueue>();
+
+function queueFor(store: OfficeStore): KeyedQueue {
+  let queue = queues.get(store);
+  if (!queue) {
+    queue = new KeyedQueue();
+    queues.set(store, queue);
+  }
+  return queue;
 }
 
 /**
  * Convert one verified delivery, apply it to the office snapshot and publish.
  * Re-deliveries are dropped: event ids are derived from the delivery id, so applying
- * the same delivery twice is a no-op.
+ * the same delivery twice is a no-op. Deliveries for the same office are serialized.
  */
 export async function ingestWebhook(hook: GithubWebhook, deps: IngestDeps): Promise<IngestResult> {
   const payload = obj(hook.payload);
   const identity = officeFromPayload(payload);
   if (!identity) return { events: [], applied: [] };
 
+  // One office is written by one delivery at a time: the loop below reads a snapshot
+  // and writes it back, so overlapping deliveries would lose each other's events.
+  const queue = deps.queue ?? queueFor(deps.store);
+  return queue.run(identity.office.id, () => applyDelivery(hook, identity, deps));
+}
+
+async function applyDelivery(
+  hook: GithubWebhook,
+  identity: { building: Building; office: Office },
+  deps: IngestDeps,
+): Promise<IngestResult> {
   const { building, office } = identity;
   const events = githubToEvents(hook);
   if (events.length === 0) return { officeId: office.id, events, applied: [] };

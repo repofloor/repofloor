@@ -26,6 +26,12 @@ Deliveries are idempotent: event ids are derived from the delivery id, so GitHub
 re-sending the same webhook applies nothing the second time (`applied: 0`). With Postgres
 behind the store that holds across a restart too.
 
+Deliveries for one office are serialized ([src/serialize.ts](src/serialize.ts)):
+applying one is read-modify-write over the snapshot and GitHub delivers concurrently,
+so overlapping deliveries would otherwise drop each other's events. That holds inside a
+process; across processes the store still has to provide it — see the note on the
+missing ingest transaction below.
+
 Unmapped events (`star`, `fork`, …) and deliveries without a `repository` (such as
 `ping`) are accepted and ignored — `202` with `events: 0`.
 
@@ -209,9 +215,11 @@ presence volume demands it.
 - Bodies above 25 MB are refused with `413` without being buffered (GitHub's own limit).
 - `markDelivered` and `save` are two statements, not one transaction: a crash between
   them records an event id whose effect was never persisted, and that one event is then
-  lost (the next delivery still lands). Closing the gap means a transaction spanning the
-  ingest loop, which the `OfficeStore` interface deliberately does not expose yet — it
-  would be the first change worth making to it, next to a periodic full resync.
+  lost (the next delivery still lands). The same transaction would also extend the
+  per-office serialization above to more than one api process — today two processes
+  writing the same office can still lose each other's events. Both want a transaction
+  spanning the ingest loop, which the `OfficeStore` interface deliberately does not
+  expose yet; it is the first change worth making to it, next to a periodic resync.
 - A read decision is cached for a minute, so losing access can take up to a minute to
   take effect unless a `member` or `installation_repositories` delivery arrives first.
   ADR 0001 accepts that; the alternative is a GitHub API call per request.

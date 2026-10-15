@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { createApp } from "../src/app.ts";
+import { ingestWebhook } from "../src/ingest.ts";
 import { InMemoryEventPublisher } from "../src/publisher.ts";
 import { InMemoryOfficeStore } from "../src/store.ts";
 import { signWebhook } from "../src/signature.ts";
@@ -211,4 +212,30 @@ test("bad headers, bad JSON, unknown offices and wrong methods answer sensibly",
 
 test("createApp refuses to run without a webhook secret", () => {
   assert.throws(() => createApp({ webhookSecret: "" }), /webhookSecret is required/);
+});
+
+test("two deliveries for one office at the same time keep both sets of events", async () => {
+  // GitHub delivers concurrently and ingest is read-modify-write over the snapshot:
+  // started in the same tick, both would read the same state and the second save would
+  // drop the first one's events. Driven below the HTTP layer on purpose — that is
+  // where the overlap is real.
+  const store = new InMemoryOfficeStore();
+  const deps = { store, publisher: new InMemoryEventPublisher() };
+  const delivery = (who: string, id: string) => ({
+    event: "push",
+    deliveryId: id,
+    payload: { ...pushPayload, sender: { login: who } },
+  });
+
+  await Promise.all([
+    ingestWebhook(delivery("ayse", "concurrent-a"), deps),
+    ingestWebhook(delivery("mehmet", "concurrent-b"), deps),
+  ]);
+
+  const state = await store.load("repofloor/repofloor");
+  assert.deepEqual(
+    state!.actors.map((a) => a.actor.id).sort(),
+    ["ayse", "mehmet"],
+    "neither delivery was lost",
+  );
 });
