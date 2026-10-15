@@ -62,8 +62,15 @@ explains *why*; the doc explains *what*. Append, don't rewrite.
 - **2026-10-15 · Procedural pixel art by default**, no asset pipeline; sprite skins optional later.
 - **2026-10-15 · Org lives under @aliosmanmho**; no new GitHub user.
 - **2026-10-15 · Not a surveillance tool.** Show *what* people do, never *how long*; detail level is a per-user setting (Full mode).
-- **2026-10-15 · First stack for Full mode is open** — Supabase vs. self-hosted Postgres+Redis to be decided in an ADR
-  (`docs/adr/0001-full-mode-stack.md`) before `apps/api` starts. Backend language is free (TypeScript preferred for shared reducer).
+- ~~**2026-10-15 · First stack for Full mode is open** — Supabase vs. self-hosted Postgres+Redis to be decided in an ADR
+  (`docs/adr/0001-full-mode-stack.md`) before `apps/api` starts.~~ Decided below.
+- **2026-10-15 · Full mode stack = self-hosted TypeScript on plain Postgres** (`docs/adr/0001-full-mode-stack.md`).
+  Supabase was rejected as the *platform*, not as a database: its strongest feature, RLS-authorized Realtime, cannot
+  express "can this user read this repo on GitHub" without a mirrored `repo_access` table — a second ACL, which rule 6
+  forbids. Redis is deferred (in-process fan-out → Postgres `LISTEN`/`NOTIFY` → Redis only if presence volume demands it).
+  The database stays replaceable, so managed Postgres (Neon, RDS, even Supabase's) remains a deployment detail.
+  Cost: ~$6-12/month for one VPS, against ~$25/month Supabase Pro. The deciding factor was lock-in: the exit cost from
+  this decision is a connection string, and it is cheapest to take now, with no users to migrate.
 - **2026-10-15 · Lite aims for ~30s freshness, not real time.** One workflow job (snapshot + deploy
   together), `cancel-in-progress: false` so a running snapshot is never restarted, `pull_request_target`
   so PR events can publish too, and the page re-reads its snapshot every 15s with a conditional request.

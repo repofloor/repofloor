@@ -1,6 +1,6 @@
 # Handoff — where the project stands
 
-_Last updated: 2026-10-15 (published to GitHub, starter issues opened)._
+_Last updated: 2026-10-15 (Phase 2 kick-off: ADR 0001 + apps/api skeleton)._
 
 ## Done (Phase 0)
 
@@ -16,6 +16,16 @@ _Last updated: 2026-10-15 (published to GitHub, starter issues opened)._
 - The 16 starter issues from `docs/GOOD_FIRST_ISSUES.md` are open as issues #1-#16, labelled `good first issue`
   plus an area label (`engine`, `reducer`, `lite`, `demo`).
 
+## Done (Phase 2 kick-off)
+
+- `docs/adr/0001-full-mode-stack.md`: **self-hosted TypeScript services on plain Postgres**, Supabase not adopted
+  as the platform. Redis deferred (in-process fan-out, then Postgres `LISTEN`/`NOTIFY`); the database stays
+  replaceable; authorization is a cached GitHub call, never a permissions table.
+- `apps/api` skeleton, no runtime dependencies beyond the two workspace packages: HMAC-SHA256 signature
+  verification over the raw body (`WEBHOOK_SECRET`), `githubToEvents` + `reduce` into an office snapshot,
+  dedup on delivery-derived event ids, `POST /webhook`, `GET /office/:owner/:repo` (with decay on read),
+  `GET /healthz`. 12 tests. `apps/api/README.md` has the GitHub App setup and local tunnel instructions.
+
 ## Not yet done / known rough edges
 
 - Speech bubbles overlap when several actors in the top desk row talk at once (needs simple collision/stagger).
@@ -28,8 +38,14 @@ _Last updated: 2026-10-15 (published to GitHub, starter issues opened)._
 ## Immediate next steps (suggested order)
 
 1. Phase 1 quick wins: bubble stagger, A* walking (#5), night tint (#4), text alternative under the canvas (#15).
-2. Phase 2 kick-off (Full mode): write `docs/adr/0001-full-mode-stack.md` deciding Supabase vs. self-hosted
-   Postgres+Redis, then bootstrap `apps/api` (GitHub App webhook receiver using `githubToEvents`) first.
+2. Phase 2, next slices of `apps/api` (the ADR and the skeleton are done):
+   a. **Postgres behind `OfficeStore`** — snapshot per office + a unique index on the delivery id, so dedup
+      and snapshots survive a restart. Today everything is in memory.
+   b. **Authorize `GET /office/:owner/:repo`** against GitHub repo access (cached, 60s TTL, invalidated on
+      `installation_repositories` / `member`). Until then the service is only safe on public repos.
+   c. GitHub App manifest + install flow; persist installations and their tokens.
+   d. `apps/realtime`: WebSocket fan-out per office consuming `EventPublisher`, presence with TTL.
+   e. `docker-compose.yml`: api + realtime + Postgres.
 
 ## Decisions already made
 

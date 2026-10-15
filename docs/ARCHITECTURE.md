@@ -68,13 +68,17 @@ PR reviews spawn transient meeting rooms.
 ### Services
 | Service | Responsibility | Notes |
 |---|---|---|
-| `apps/api` | Verify webhook signatures, `githubToEvents`, persist, publish to Redis | Idempotent on delivery id; periodic full resync per office |
+| `apps/api` | Verify webhook signatures, `githubToEvents`, persist, publish | Skeleton shipped (in-memory store, no auth on reads yet). Idempotent on delivery id; periodic full resync per office |
 | `apps/realtime` | WebSocket fan-out per office, presence (TTL in Redis), rooms, chat | Presence is never written to Postgres |
 | `apps/web` | Buildings list, office view (engine), profile (emoji, agent tokens) | Thin; most logic is in packages |
 
-Storage: Postgres (installations, rooms, profiles, agent tokens, 7-day chat), Redis
-(presence, pub/sub). First iteration can be Supabase (Auth with GitHub provider,
-Postgres, Realtime) to ship faster; `apps/realtime` is the escape hatch when needed.
+Storage: Postgres (installations, rooms, profiles, agent tokens, 7-day chat). Decided in
+[ADR 0001](adr/0001-full-mode-stack.md): self-hosted services on **plain** Postgres,
+Supabase not adopted as the platform — its RLS-authorized Realtime would need a mirrored
+`repo_access` table, and rule 6 forbids a second ACL. Redis is deferred: pub/sub starts
+in-process, then Postgres `LISTEN`/`NOTIFY`, and Redis arrives only when presence volume
+demands it. `apps/api` already declares the seam (`OfficeStore`, `EventPublisher`), so
+each of those is a one-file change.
 
 ### Agents
 Each user mints an agent token. Claude Code's `PostToolUse` hook (and adapters for

@@ -7,6 +7,7 @@ live presence, rooms, chat, agent telemetry — Phase 2+, not started).
 
 Read `docs/ARCHITECTURE.md` before touching anything beyond a single package.
 Current state and next steps: `docs/HANDOFF.md`. Founder's original requests and the decision log: `docs/VISION.md` (append decisions there).
+Decisions that need their reasoning kept get an ADR in `docs/adr/NNNN-slug.md` (context, options, decision, consequences) plus a one-paragraph entry in `docs/VISION.md`.
 
 ## Commands
 
@@ -14,7 +15,7 @@ Current state and next steps: `docs/HANDOFF.md`. Founder's original requests and
 pnpm install                 # Node >= 20, pnpm >= 9
 pnpm build                   # packages → demo → lite-action bundle (order matters)
 pnpm dev                     # demo with simulated team, http://localhost:5173
-pnpm test                    # node --test via tsx (protocol, reducer, lite-action)
+pnpm test                    # node --test via tsx (protocol, reducer, lite-action, api)
 pnpm typecheck
 pnpm --filter @repofloor/reducer test   # single package
 ```
@@ -30,7 +31,9 @@ packages/reducer    reduce(state, event), decay(state, now), replay(), githubToE
 packages/engine     Pixi.js v8 renderer. OfficeRenderer.mount/setState/applyEffect. Procedural pixel art.
 apps/demo           Vite app; simulator.ts fakes a team + 2 agents. Also the static page Lite publishes.
 apps/lite-action    GitHub Action. collect.ts (REST → events → replay) + main.ts. dist/index.js IS COMMITTED.
-apps/api|realtime|web   Planned (Full mode). README stubs only.
+apps/api            GitHub App webhook receiver (Full mode). Signature check → githubToEvents → reduce → GET /office/:owner/:repo.
+                    Store and publisher are interfaces with in-memory impls (ADR 0001). No runtime deps.
+apps/realtime|web   Planned (Full mode). README stubs only.
 docs/               ARCHITECTURE, PROTOCOL, LITE, ROADMAP, CONTRIBUTING-adjacent docs, HANDOFF
 ```
 

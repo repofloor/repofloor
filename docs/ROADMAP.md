@@ -17,8 +17,10 @@ Phases, not dates. Each phase ends with something people can use.
 - [ ] Accessibility: text alternative of the office (who's doing what) under the canvas
 
 ## Phase 2 — Full mode foundation
+- [x] Stack decided: self-hosted TypeScript on plain Postgres ([ADR 0001](adr/0001-full-mode-stack.md))
 - [ ] GitHub App manifest + install flow; Sign in with GitHub
-- [ ] `apps/api`: webhook ingestion (signature check, dedup, reducer), REST for snapshots
+- [x] `apps/api`: webhook ingestion (signature check, dedup, reducer), REST for snapshots
+- [ ] `apps/api`: Postgres behind `OfficeStore`; authorize snapshot reads against GitHub repo access
 - [ ] `apps/realtime`: per-office WebSocket, presence with TTL
 - [ ] `apps/web`: buildings → offices → office view
 - [ ] Profile: choose your emoji

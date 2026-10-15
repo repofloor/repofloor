@@ -1,0 +1,24 @@
+{
+  "name": "@repofloor/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Full mode ingestion service: verifies GitHub App webhooks, reduces them into OfficeState, serves snapshots",
+  "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "test": "node --test --import tsx tests/*.test.ts"
+  },
+  "dependencies": {
+    "@repofloor/protocol": "workspace:*",
+    "@repofloor/reducer": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
