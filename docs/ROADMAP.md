@@ -33,11 +33,13 @@ Ordered: each sub-phase unblocks the next. 2A is prerequisites the later ones ne
 - [x] **A3** Operational leftovers: `GET /offices` (the store's `list` has no route),
       structured logs, and the documented single-command Postgres restore ADR 0001 promises
 
-### 2B — `apps/realtime`
-- [ ] **B1** `PostgresEventPublisher` on `LISTEN`/`NOTIFY` behind the existing `EventPublisher`
-- [ ] **B2** WebSocket server, one channel per office; A1's check at connect; session cookie
-      *or* bearer token as the identity
-- [ ] **B3** Presence with TTL
+### 2B — `apps/realtime` ✅
+- [x] **B1** `PostgresEventPublisher` on `LISTEN`/`NOTIFY` behind the existing `EventPublisher`
+      ([ADR 0002](adr/0002-realtime-transport.md))
+- [x] **B2** WebSocket server, one channel per office; every socket authorized by asking
+      `apps/api` with the caller's own credentials forwarded, so the check that runs is A1's
+      and not a copy — session cookie *or* bearer token as the identity
+- [x] **B3** Presence with TTL
 
 ### 2C — `apps/web`
 - [ ] **C1** Office page: mount the engine against `GET /office/:owner/:repo`
@@ -55,6 +57,18 @@ Ordered: each sub-phase unblocks the next. 2A is prerequisites the later ones ne
       (the `collect.ts` shape Lite uses)
 - [ ] **D4** Sessions across restarts and instances (`SessionStore`) — only when running in more
       than one place actually hurts
+
+## Phase 1.5 — The floor people actually see
+
+Pinned reference and the full reading: [VISUAL_TARGET](VISUAL_TARGET.md). Cheapest first;
+none of it is scheduled, and Phase 2 stays ahead of it.
+
+- [ ] Per-actor status strip under the canvas (name · emoji · what they are doing) — also
+      most of #15, the accessibility text alternative
+- [ ] Running activity log of recent events, which is what makes the page readable on a phone
+- [ ] Rooms as architecture: interior walls, doorways, a corridor — not tinted regions
+- [ ] Furniture parameterised by room kind (meeting table, sofa, plants), still procedural
+- [ ] Palette pass: desaturated furniture, colour reserved for people
 
 ## Phase 3 — Agents
 - [ ] Agent tokens; `POST /agent/events`

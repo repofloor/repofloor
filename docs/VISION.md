@@ -76,8 +76,30 @@ explains *why*; the doc explains *what*. Append, don't rewrite.
   so PR events can publish too, and the page re-reads its snapshot every 15s with a conditional request.
   The Actions queue is the floor; sub-second presence stays a Full-mode feature.
 
+- **2026-10-15 · Realtime = WebSocket via `ws`, fan-out over Postgres `LISTEN`/`NOTIFY`** (`docs/adr/0002-realtime-transport.md`).
+  Node has no WebSocket *server*, so the choice was import one or write RFC 6455 ourselves. We import: masking,
+  fragmentation, ping/pong and the close handshake are ~300 lines of protocol code on an unauthenticated edge, where a
+  length-handling mistake is a denial-of-service hole rather than a bug — a bad trade for one fewer line in
+  `package.json`. SSE was close and would have won if 2B were the end of the road, but Phase 4 chat and proximity are
+  genuinely bidirectional, and paying for the transport twice is worse than the dependency. Fan-out takes ADR 0001 at
+  its word and uses `LISTEN`/`NOTIFY` rather than Redis: no new infrastructure, and the 8000-byte payload cap is met
+  by sending events when they fit and a pointer when they do not, the subscriber then reloading the snapshot. `NOTIFY`
+  is not durable, which is acceptable because realtime is a speed-up over polling and never the source of truth.
+  Every socket is authorized by asking api over HTTP with the caller’s own credentials forwarded, rather than by
+  realtime re-running the check: a WebSocket cannot carry an `Authorization` header, so a browser’s only identity is
+  the session cookie, and sessions stay in the api’s memory so that no credential is ever written to the database.
+  Delegation is therefore the stronger form of “one check”, and realtime ends up holding no credential at all.
+  Presence is ephemeral, never written to the snapshot, and needs no protocol change: `actor.upsert` on arrival,
+  `actor.leave` on departure (only for viewers GitHub activity does not already place in the office), `idle` for
+  someone merely watching. It says who is here, never for how long — rule 6 and the line above it.
+
 ## Open questions (for the next conversation)
 
-- Visual style: pixel-art (current) was chosen implicitly by the prototype; isometric/modern was offered and not decided.
+- ~~Visual style: pixel-art (current) was chosen implicitly by the prototype; isometric/modern was offered and not decided.~~
+  **Settled on top-down pixel art**, with a reference pinned in [`docs/VISUAL_TARGET.md`](VISUAL_TARGET.md) (2026-10-15):
+  rooms as real architecture rather than tinted regions, furniture that differs by room kind, a per-actor status strip
+  and a running activity log under the canvas. Not scheduled — Phase 2 stays ahead of it, because a prettier floor with
+  nothing live on it is worth less than a plain one that updates in a second. The simulated chatter and the
+  per-person durations in the reference are explicitly not taken.
 - Chat retention, who can create rooms (anyone with write access?), whether rooms are per repo or per org.
 - Should Lite also support a *user* building (all my repos on one page) via a profile-repo workflow?
