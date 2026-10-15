@@ -1,6 +1,6 @@
 # Handoff — where the project stands
 
-_Last updated: 2026-10-15 (Phase 2: ADR 0001, apps/api skeleton, Postgres store, authorized reads, sign-in + App installation)._
+_Last updated: 2026-10-15 (Phase 2A done: shared read check, atomic ingest, offices listing, structured logs, operations doc)._
 
 ## Done (Phase 0)
 
@@ -52,6 +52,22 @@ _Last updated: 2026-10-15 (Phase 2: ADR 0001, apps/api skeleton, Postgres store,
   No live GitHub and no live database in CI: GitHub is faked, and the App JWT is verified against a keypair
   generated inside the test.
 
+## Done (Phase 2A — `apps/api` hardening)
+
+- **A1**: the read decision moved out of `handleOffice` into `src/authorize.ts`
+  (`authorizeOfficeRead`, exposed as `app.authorizeRead`). It takes an `IncomingMessage`, which a
+  WebSocket upgrade request also is, so 2B's socket runs this check rather than its own.
+- **A2**: ingest is atomic. `OfficeStore.transaction(key, fn)` — optional, so a store without one
+  runs inline — wraps mark-delivered + save, and publishing moved after the commit. The Postgres
+  implementation takes a transaction-scoped `pg_advisory_xact_lock` on the office id, which extends
+  the in-process `KeyedQueue` guarantee across processes and covers an office's first delivery too.
+- **A3**: `GET /offices` (public to anyone, private only to a caller GitHub vouches for, `partial`
+  when a check was unavailable); structured JSON logs in `src/log.ts` with `LOG_LEVEL`, wired through
+  `createApp` and `server.ts` — query strings are never logged, because the OAuth callback carries a
+  live code in one; and [`docs/OPERATIONS.md`](OPERATIONS.md) with the single-command `pg_restore`
+  ADR 0001 promised, plus what every log line means.
+- 122 tests in `apps/api` (one skipped: the Postgres integration test needs `DATABASE_URL`).
+
 ## Not yet done / known rough edges
 
 - Speech bubbles overlap when several actors in the top desk row talk at once (needs simple collision/stagger).
@@ -59,10 +75,6 @@ _Last updated: 2026-10-15 (Phase 2: ADR 0001, apps/api skeleton, Postgres store,
 - `applyEffect` is called by the demo; Lite page never calls it (no live events) — fine for now.
 - No engine unit tests (visual package). A Playwright screenshot workflow is issue #16.
 - Lite `collect.ts` does not page beyond 100 commits / 50 PRs / 50 issues / 20 runs.
-- `apps/api`: `markDelivered` then `save` are two statements. A crash in between loses that one event's
-  effect. Needs a transaction across the ingest loop (an `OfficeStore` change) or the planned periodic resync.
-- `apps/api`: `store.list()` has no HTTP route yet, and the read check lives inside `handleOffice` — lift it
-  out when `apps/realtime` needs the same check at socket connect.
 - `apps/api`: sessions live in memory, so a restart signs everyone out and more than one instance needs
   sticky sessions. Deliberate — it keeps every credential out of the database — but it is the first thing to
   revisit when the service is run in more than one place.
@@ -72,26 +84,18 @@ _Last updated: 2026-10-15 (Phase 2: ADR 0001, apps/api skeleton, Postgres store,
 
 ## Immediate next steps (suggested order)
 
-1. Phase 1 quick wins: bubble stagger, A* walking (#5), night tint (#4), text alternative under the canvas (#15).
-2. Phase 2, next slices of `apps/api` (the ADR, the skeleton, the Postgres store, authorized reads and
-   sign-in + installations are done):
-   a. **`apps/realtime`**: WebSocket fan-out per office consuming `EventPublisher` (Postgres `LISTEN`/`NOTIFY`
-      first), presence with TTL. The same read check must gate a socket at connect time, so lift it out of
-      `handleOffice` when it is needed in two places — and a socket should be able to authenticate with the
-      session cookie, which now exists.
-   b. **`apps/web`**: the first consumer of sign-in. A page that mounts the engine against
-      `GET /office/:owner/:repo`, with `/auth/github` behind a button and `/auth/me` deciding what to show.
-      It is also what turns `/auth/install/callback`'s JSON into a real landing page (pass `return_to`).
-   c. **Sessions across restarts and instances**, if and when it hurts: a `SessionStore` on Postgres with the
-      user token encrypted at rest, or refresh tokens so a session holds a short-lived credential. Today a
-      restart signs people out and two instances need sticky sessions.
-   d. **Use the App identity for something**: a periodic resync that mints an installation token and rebuilds
-      an office from the REST API (the same `collect.ts` shape Lite uses), which also closes the
-      `markDelivered`/`save` gap below.
-   e. Run `docker compose up --build` once on a machine with Docker and fix whatever the build reveals; add
-      `realtime` to the compose file when it exists.
-   f. Operational leftovers: a `GET /offices` listing (the store's `list` has no route), structured logs,
-      and a documented single-command Postgres restore (ADR 0001 promises one).
+The remaining Full-mode work is phased in [`docs/ROADMAP.md`](ROADMAP.md) as **2A → 2B → 2C → 2D**,
+and each sub-phase there is lettered (A1, A2, …). This list says only where we are in it:
+
+1. **2A — `apps/api` hardening**, in progress. A1 lifts the read check out of `handleOffice`
+   (2B's socket needs the identical check), A2 makes ingest atomic, A3 clears the operational
+   leftovers. Nothing in 2B/2C should start before A1.
+2. **2B — `apps/realtime`**, then **2C — `apps/web`**, then **2D — run it against the real GitHub
+   and a real Docker host**. D2 matters more than it looks: no part of the sign-in flow has ever
+   met github.com.
+3. Phase 1 polish (bubble stagger, A* walking #5, night tint #4, text alternative #15) is
+   deliberately *not* in this queue — those are the `good first issue` set, left for contributors.
+   Take one only if it ages without a taker.
 
 ## Decisions already made
 

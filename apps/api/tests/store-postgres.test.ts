@@ -207,3 +207,59 @@ test(
     }
   },
 );
+
+/** A pool whose one connection is a recording `FakeDb`. */
+class FakePool extends FakeDb {
+  released = 0;
+  async connect(): Promise<Queryable & { release(): void }> {
+    const pool = this;
+    return {
+      query: (sql: string, params?: unknown[]) => pool.query(sql, params),
+      release: () => {
+        pool.released += 1;
+      },
+    };
+  }
+}
+
+test("transaction takes a connection, locks the office, and commits", async () => {
+  const pool = new FakePool();
+  const store = new PostgresOfficeStore(pool);
+
+  const inside = await store.transaction("repofloor/repofloor", async (tx) => {
+    await tx.save(office.id, state());
+    return "done";
+  });
+
+  assert.equal(inside, "done");
+  assert.equal(pool.sqlOf(0), "begin");
+  assert.match(pool.sqlOf(1), /pg_advisory_xact_lock/);
+  assert.deepEqual(pool.calls[1]?.params, ["repofloor/repofloor"]);
+  assert.match(pool.sqlOf(2), /^insert into offices/);
+  assert.equal(pool.sqlOf(3), "commit");
+  assert.equal(pool.released, 1);
+});
+
+test("a throw inside rolls back and still releases the connection", async () => {
+  const pool = new FakePool();
+  const store = new PostgresOfficeStore(pool);
+
+  await assert.rejects(
+    () =>
+      store.transaction("repofloor/repofloor", async (tx) => {
+        await tx.markDelivered("evt-1");
+        throw new Error("reducer blew up");
+      }),
+    /reducer blew up/,
+  );
+
+  assert.equal(pool.sqlOf(pool.calls.length - 1), "rollback");
+  assert.equal(pool.released, 1);
+});
+
+test("without a pool there is nothing to isolate, so the body just runs", async () => {
+  const db = new FakeDb();
+  const store = new PostgresOfficeStore(db);
+  assert.equal(await store.transaction("x", async (tx) => tx === store), true);
+  assert.equal(db.calls.length, 0, "no begin/commit against a bare Queryable");
+});

@@ -17,14 +17,44 @@ Phases, not dates. Each phase ends with something people can use.
 - [ ] Accessibility: text alternative of the office (who's doing what) under the canvas
 
 ## Phase 2 — Full mode foundation
+
+Ordered: each sub-phase unblocks the next. 2A is prerequisites the later ones need.
+
 - [x] Stack decided: self-hosted TypeScript on plain Postgres ([ADR 0001](adr/0001-full-mode-stack.md))
-- [ ] GitHub App manifest + install flow; Sign in with GitHub
 - [x] `apps/api`: webhook ingestion (signature check, dedup, reducer), REST for snapshots
-- [ ] `apps/api`: Postgres behind `OfficeStore`; authorize snapshot reads against GitHub repo access
-- [ ] `apps/realtime`: per-office WebSocket, presence with TTL
-- [ ] `apps/web`: buildings → offices → office view
+- [x] `apps/api`: Postgres behind `OfficeStore`; authorize snapshot reads against GitHub repo access
+- [x] GitHub App manifest + install flow; Sign in with GitHub
+
+### 2A — `apps/api` hardening (prerequisites) ✅
+- [x] **A1** Lift the read check out of `handleOffice` into one `authorizeOfficeRead`, so a
+      WebSocket connect can run the identical check (`apps/realtime` depends on this)
+- [x] **A2** Atomic ingest: `markDelivered` + `save` in one transaction, closing the crash
+      gap that loses an event's effect
+- [x] **A3** Operational leftovers: `GET /offices` (the store's `list` has no route),
+      structured logs, and the documented single-command Postgres restore ADR 0001 promises
+
+### 2B — `apps/realtime`
+- [ ] **B1** `PostgresEventPublisher` on `LISTEN`/`NOTIFY` behind the existing `EventPublisher`
+- [ ] **B2** WebSocket server, one channel per office; A1's check at connect; session cookie
+      *or* bearer token as the identity
+- [ ] **B3** Presence with TTL
+
+### 2C — `apps/web`
+- [ ] **C1** Office page: mount the engine against `GET /office/:owner/:repo`
+- [ ] **C2** Sign-in and install landing — turns `/auth/install/callback`'s JSON into a page
+      (pass `return_to`), `/auth/me` decides what to show
+- [ ] **C3** Buildings → offices → office navigation
+- [ ] **C4** Live: subscribe to the 2B socket, feed `applyEffect`
 - [ ] Profile: choose your emoji
-- [ ] Deploy: one Docker Compose (api + realtime + Postgres + Redis)
+
+### 2D — Run it for real
+- [ ] **D1** `docker compose up --build` on a machine with Docker; add `realtime` to the file
+- [ ] **D2** Create the App on github.com and walk webhook + sign-in once against the real thing
+      (everything so far is covered only against a faked GitHub)
+- [ ] **D3** Periodic resync as the App: mint an installation token, rebuild an office from REST
+      (the `collect.ts` shape Lite uses)
+- [ ] **D4** Sessions across restarts and instances (`SessionStore`) — only when running in more
+      than one place actually hurts
 
 ## Phase 3 — Agents
 - [ ] Agent tokens; `POST /agent/events`

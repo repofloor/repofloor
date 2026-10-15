@@ -8,7 +8,7 @@
 
 import { emptyOfficeState, type Building, type Office, type OfficeEvent, type OfficeState } from "@repofloor/protocol";
 import { githubToEvents, reduce, type GithubWebhook } from "@repofloor/reducer";
-import type { OfficeStore } from "./store.js";
+import { withOfficeTransaction, type OfficeStore } from "./store.js";
 import type { EventPublisher } from "./publisher.js";
 import { KeyedQueue } from "./serialize.js";
 
@@ -108,21 +108,31 @@ async function applyDelivery(
   const events = githubToEvents(hook);
   if (events.length === 0) return { officeId: office.id, events, applied: [] };
 
-  const applied: OfficeEvent[] = [];
-  let state = (await deps.store.load(office.id)) ?? emptyOfficeState(building, office, "full");
-  // Repo metadata (description, default branch, visibility) can change between
-  // deliveries; the newest payload wins.
-  state = { ...state, building, office };
+  // Marking an event delivered and saving the snapshot it produced are one unit of
+  // work. Split, a crash in between leaves the ledger saying "applied" and the
+  // snapshot never having seen it — the event is then lost for good, because the
+  // re-delivery is deduped away.
+  const { applied, state } = await withOfficeTransaction(deps.store, office.id, async (store) => {
+    const applied: OfficeEvent[] = [];
+    let state = (await store.load(office.id)) ?? emptyOfficeState(building, office, "full");
+    // Repo metadata (description, default branch, visibility) can change between
+    // deliveries; the newest payload wins.
+    state = { ...state, building, office };
 
-  for (const event of events) {
-    if (!(await deps.store.markDelivered(event.id))) continue;
-    state = reduce(state, event);
-    applied.push(event);
-  }
+    for (const event of events) {
+      if (!(await store.markDelivered(event.id))) continue;
+      state = reduce(state, event);
+      applied.push(event);
+    }
+
+    if (applied.length > 0) await store.save(office.id, state);
+    return { applied, state };
+  });
 
   if (applied.length === 0) return { officeId: office.id, events, applied, state };
 
-  await deps.store.save(office.id, state);
+  // After the commit, never inside it: a publish is not rolled back, and a transaction
+  // that has not landed yet must not be announced.
   await deps.publisher.publish({ officeId: office.id, events: applied, state });
   return { officeId: office.id, events, applied, state };
 }

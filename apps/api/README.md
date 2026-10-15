@@ -23,6 +23,7 @@ JWT or OAuth library.
 |---|---|
 | `POST /webhook` | A GitHub App delivery. Requires `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. Answers `202` with `{officeId, events, applied}`. |
 | `GET /office/:owner/:repo` | The current snapshot as `OfficeState` JSON, with time decay applied. Open for public offices; a private one needs a GitHub token or a session — see [Who may read an office](#who-may-read-an-office). `404` for an office that has had no deliveries. |
+| `GET /offices` | Every office the caller may see, as summaries (`{offices, partial}`). Public ones for anyone; private ones only for a caller GitHub vouches for, so the listing cannot leak the *name* of a private repo. `partial: true` means one was omitted because GitHub could not be asked. |
 | `GET /healthz` | `{ok: true, protocolVersion, signIn}`. |
 
 These five exist once sign-in is configured, and answer `501 sign_in_not_configured`
@@ -44,8 +45,14 @@ behind the store that holds across a restart too.
 Deliveries for one office are serialized ([src/serialize.ts](src/serialize.ts)):
 applying one is read-modify-write over the snapshot and GitHub delivers concurrently,
 so overlapping deliveries would otherwise drop each other's events. That holds inside a
-process; across processes the store still has to provide it — see the note on the
-missing ingest transaction below.
+process; across processes `OfficeStore.transaction` provides it: the Postgres store
+takes a transaction-scoped `pg_advisory_xact_lock` on the office id, which also covers
+an office's very first delivery, where there is no row yet to lock.
+
+Ingest is atomic. Marking an event delivered and saving the snapshot it produced are
+one transaction, so a crash in between cannot leave the ledger saying "applied" while
+the snapshot never saw it — which would lose that event for good, the re-delivery being
+deduped away. Publishing happens after the commit, never inside it.
 
 Unmapped events (`star`, `fork`, …) and deliveries without a `repository` (such as
 `ping`) are accepted and ignored — `202` with `events: 0`.
@@ -306,6 +313,11 @@ offices, the delivery ledger, the retention cut, installations — against that 
 then cleans up the rows it made. Point it at a throwaway database —
 `docker compose up postgres` is one.
 
+## Operations
+
+Backup, the single-command restore, and what the structured logs contain:
+[`docs/OPERATIONS.md`](../../docs/OPERATIONS.md).
+
 ## Storage and realtime
 
 `OfficeStore` ([src/store.ts](src/store.ts)) — `load` / `save` / `markDelivered` /
@@ -330,20 +342,22 @@ presence volume demands it.
 - Repo metadata (description, default branch, visibility) is refreshed from every
   delivery — the newest payload wins.
 - Bodies above 25 MB are refused with `413` without being buffered (GitHub's own limit).
-- `markDelivered` and `save` are two statements, not one transaction: a crash between
-  them records an event id whose effect was never persisted, and that one event is then
-  lost (the next delivery still lands). The same transaction would also extend the
-  per-office serialization above to more than one api process — today two processes
-  writing the same office can still lose each other's events. Both want a transaction
-  spanning the ingest loop, which the `OfficeStore` interface deliberately does not
-  expose yet; it is the first change worth making to it, next to a periodic resync.
+- `OfficeStore.transaction(key, fn)` is optional on purpose: it is a capability, not a
+  requirement. A store without one runs the ingest body inline (`withOfficeTransaction`),
+  which is right for a process-local map and wrong for anything durable. The key is the
+  office id, so one seam gives both halves ingest needs — all-or-nothing writes, and
+  per-office serialization that survives a second api process.
 - A read decision is cached for a minute, so losing access can take up to a minute to
   take effect unless a `member` or `installation_repositories` delivery arrives first.
   ADR 0001 accepts that; the alternative is a GitHub API call per request.
 - Sign-in added a *source of tokens*, not an authorization path. Both routes into
   `GET /office/...` converge on one `RepoAccess.canRead`, which is the only place that
-  decides a read — the shape rule 6 asks for, and the reason `apps/realtime` can reuse it
-  at socket connect without reimplementing anything.
+  decides a read — the shape rule 6 asks for.
+- That decision now lives in [src/authorize.ts](src/authorize.ts), outside the HTTP
+  handler, and `createApp` returns it as `app.authorizeRead(officeId, req)`. It takes an
+  `IncomingMessage`, which a WebSocket upgrade request also is, so `apps/realtime` runs
+  this check at connect rather than its own. A socket cheaper to open than a `GET` would
+  be a hole, not a feature.
 - Sessions are in memory, so a restart signs people out and two instances need sticky
   sessions. That buys a database with no credential in it at all. `SessionStore` is the
   seam if the trade ever has to flip; a Postgres implementation would want the user token

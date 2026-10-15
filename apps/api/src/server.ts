@@ -11,6 +11,7 @@
  *   GITHUB_WEB_URL            default https://github.com (where the browser is sent)
  *   PORT                      default 8787
  *   HOST                      default 0.0.0.0
+ *   LOG_LEVEL                 debug | info | warn | error | silent (default info)
  *
  * Sign-in and the App identity are optional. Set them and `/auth/...` comes alive;
  * leave them unset and the service behaves exactly as before, with every caller
@@ -33,6 +34,7 @@ import { createApp } from "./app.js";
 import { GitHubRepoAccess } from "./access.js";
 import { GitHubAppAuth } from "./app-auth.js";
 import { createPool, migrate, type PoolOptions } from "./db.js";
+import { createLogger, errorFields, levelFromEnv } from "./log.js";
 import {
   InMemoryInstallationStore,
   PostgresInstallationStore,
@@ -44,9 +46,11 @@ import { SignIn } from "./sign-in.js";
 import { InMemoryOfficeStore, type OfficeStore } from "./store.js";
 import { PostgresOfficeStore } from "./store-postgres.js";
 
+const log = createLogger({ level: levelFromEnv(process.env["LOG_LEVEL"]), base: { service: "api" } });
+
 const secret = process.env["WEBHOOK_SECRET"];
 if (!secret) {
-  console.error("[api] WEBHOOK_SECRET is not set. Refusing to start: unsigned deliveries cannot be trusted.");
+  log.error("WEBHOOK_SECRET is not set; refusing to start, unsigned deliveries cannot be trusted");
   process.exit(1);
 }
 
@@ -72,10 +76,11 @@ if (databaseUrl) {
   const pool = await createPool(databaseUrl, poolOptions);
   try {
     const applied = await migrate(pool);
-    console.log(applied.length > 0 ? `[api] migrations applied: ${applied.join(", ")}` : "[api] schema up to date");
+    if (applied.length > 0) log.info("migrations applied", { migrations: applied });
+    else log.info("schema up to date");
   } catch (err) {
     // Starting without the schema would mean dropping deliveries, so refuse instead.
-    console.error("[api] could not reach DATABASE_URL or apply migrations:", err instanceof Error ? err.message : err);
+    log.error("could not reach DATABASE_URL or apply migrations", errorFields(err));
     await pool.end().catch(() => {});
     process.exit(1);
   }
@@ -89,8 +94,8 @@ if (databaseUrl) {
 
   const prune = (): void => {
     pg.pruneDeliveries()
-      .then((n) => n > 0 && console.log(`[api] pruned ${n} applied event ids`))
-      .catch((err: unknown) => console.error("[api] prune failed", err));
+      .then((n) => n > 0 && log.info("pruned applied event ids", { pruned: n }))
+      .catch((err: unknown) => log.error("prune failed", errorFields(err)));
   };
   prune();
   const timer = setInterval(prune, PRUNE_INTERVAL_MS);
@@ -117,6 +122,7 @@ const app = createApp({
   store,
   installations,
   ...(signIn ? { signIn } : {}),
+  logger: log,
   access: new GitHubRepoAccess({
     ...(apiUrl ? { apiUrl } : {}),
     ...(Number.isFinite(ttl) && ttl > 0 ? { ttlMs: ttl } : {}),
@@ -125,27 +131,22 @@ const app = createApp({
 const server = createServer(app.handler);
 
 server.listen(port, host, () => {
-  console.log(`[api] listening on http://${host}:${port}`);
-  console.log(
-    databaseUrl
-      ? "[api] postgres store: snapshots and delivery dedup survive a restart"
-      : "[api] in-memory store: snapshots are lost on restart (set DATABASE_URL for Postgres)",
-  );
-  console.log(
-    signIn
-      ? `[api] sign-in enabled; the App's callback URL must be ${signIn.redirectUri}`
-      : "[api] sign-in disabled (set PUBLIC_BASE_URL, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, SESSION_SECRET)",
-  );
-  console.log(
-    appAuth
-      ? "[api] App identity configured: installation tokens can be minted"
-      : "[api] no App identity (set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY) — installations will not be recorded",
-  );
+  // One line with the whole shape of this process: which optional halves are on is
+  // the first thing anyone asks when a deployment behaves unlike another.
+  log.info("listening", {
+    url: `http://${host}:${port}`,
+    store: databaseUrl ? "postgres" : "memory",
+    signIn: signIn ? "enabled" : "disabled",
+    ...(signIn ? { callbackUrl: signIn.redirectUri } : {}),
+    appIdentity: appAuth ? "configured" : "absent",
+  });
+  if (!databaseUrl) log.warn("in-memory store: snapshots are lost on restart; set DATABASE_URL for Postgres");
+  if (!appAuth) log.warn("no App identity (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY): installations go unrecorded");
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    console.log(`[api] ${signal}, closing`);
+    log.info("shutting down", { signal });
     server.close(() => {
       close().then(
         () => process.exit(0),
@@ -164,7 +165,7 @@ function buildAppAuth(): GitHubAppAuth | undefined {
     try {
       privateKey = readFileSync(keyPath, "utf8");
     } catch (err) {
-      console.error(`[api] could not read GITHUB_APP_PRIVATE_KEY_PATH (${keyPath}):`, err instanceof Error ? err.message : err);
+      log.error("could not read GITHUB_APP_PRIVATE_KEY_PATH", { path: keyPath, ...errorFields(err) });
       process.exit(1);
     }
   }
@@ -173,7 +174,7 @@ function buildAppAuth(): GitHubAppAuth | undefined {
   if (!appId || !privateKey) {
     // Half-configured is a mistake, not a mode: say so instead of silently running
     // without an App identity.
-    console.error("[api] GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY (or _PATH) must be set together.");
+    log.error("GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY (or _PATH) must be set together");
     process.exit(1);
   }
 
@@ -198,14 +199,14 @@ function buildSignIn(): SignIn | undefined {
     .map(([name]) => name);
 
   if (missing.length > 0 || !clientId || !clientSecret || !cookieSecret || !baseUrl) {
-    console.error(`[api] sign-in is partly configured; missing: ${missing.join(", ")}. Set all four or none.`);
+    log.error("sign-in is partly configured; set all four or none", { missing });
     process.exit(1);
   }
 
   if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://localhost")) {
     // The session cookie can only be Secure over https, so anything else in production
     // would send it in clear.
-    console.warn(`[api] PUBLIC_BASE_URL is not https (${baseUrl}): the session cookie will not be Secure.`);
+    log.warn("PUBLIC_BASE_URL is not https: the session cookie will not be Secure", { baseUrl });
   }
 
   const sessionTtl = Number(process.env["SESSION_TTL_MS"]);

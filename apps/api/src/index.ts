@@ -1,6 +1,16 @@
 export { createApp, MAX_BODY_BYTES, type App, type AppOptions } from "./app.js";
+export {
+  authorizeOfficeRead,
+  listReadableOffices,
+  readCredential,
+  type OfficeListDeps,
+  type OfficeListing,
+  type OfficeSummary,
+  type OfficeReadDeps,
+  type OfficeReadResult,
+} from "./authorize.js";
 export { ingestWebhook, officeFromPayload, type IngestDeps, type IngestResult } from "./ingest.js";
-export { InMemoryOfficeStore, type OfficeStore } from "./store.js";
+export { InMemoryOfficeStore, withOfficeTransaction, type OfficeStore } from "./store.js";
 export {
   PostgresOfficeStore,
   DEFAULT_EVENT_RETENTION_DAYS,
@@ -83,5 +93,16 @@ export {
   type EventPublisher,
   type OfficeUpdate,
 } from "./publisher.js";
+export {
+  createLogger,
+  errorFields,
+  levelFromEnv,
+  silentLogger,
+  LEVELS,
+  type Fields,
+  type Level,
+  type Logger,
+  type LoggerOptions,
+} from "./log.js";
 export { SIGNATURE_HEADER, signWebhook, verifyWebhookSignature } from "./signature.js";
 export { KeyedQueue } from "./serialize.js";

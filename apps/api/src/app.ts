@@ -3,6 +3,7 @@
  * has is an interface declared in this package.
  *
  *   POST /webhook                GitHub App deliveries (signature required)
+ *   GET  /offices                every office this caller may see, as summaries
  *   GET  /office/:owner/:repo    the current snapshot, as OfficeState JSON
  *                                (a private office needs a GitHub token or a session)
  *   GET  /auth/github            start "Sign in with GitHub"       ─┐
@@ -17,10 +18,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { PROTOCOL_VERSION } from "@repofloor/protocol";
 import { decay, type GithubWebhook } from "@repofloor/reducer";
-import { accessInvalidations, bearerToken, GitHubRepoAccess, type RepoAccess } from "./access.js";
+import { accessInvalidations, GitHubRepoAccess, type RepoAccess } from "./access.js";
+import {
+  authorizeOfficeRead,
+  listReadableOffices,
+  type OfficeListDeps,
+  type OfficeReadResult,
+} from "./authorize.js";
 import { header, json, MAX_BODY_BYTES, readBody } from "./http.js";
 import { ingestWebhook } from "./ingest.js";
 import { installationFromPayload, type InstallationStore } from "./installations.js";
+import { errorFields, silentLogger, type Logger } from "./log.js";
 import { NoopEventPublisher, type EventPublisher } from "./publisher.js";
 import type { SignIn } from "./sign-in.js";
 import { InMemoryOfficeStore, type OfficeStore } from "./store.js";
@@ -50,6 +58,11 @@ export interface AppOptions {
    * it is what lets the service later act as the App.
    */
   installations?: InstallationStore | undefined;
+  /**
+   * Where the service talks. Silent by default so importing `createApp` in a test or
+   * another process writes nothing; `server.ts` passes a real one.
+   */
+  logger?: Logger | undefined;
   /** Injected in tests so responses are deterministic. */
   now?: () => string;
 }
@@ -59,6 +72,11 @@ export interface App {
   store: OfficeStore;
   publisher: EventPublisher;
   access: RepoAccess;
+  /**
+   * The read check behind `GET /office/...`, exposed so another process in the same
+   * deployment — `apps/realtime` at socket connect — runs this one and not its own.
+   */
+  authorizeRead: (officeId: string, req: IncomingMessage) => Promise<OfficeReadResult>;
 }
 
 export function createApp(options: AppOptions): App {
@@ -68,8 +86,16 @@ export function createApp(options: AppOptions): App {
   const signIn = options.signIn;
   const installations = options.installations;
   const now = options.now ?? (() => new Date().toISOString());
+  const log = options.logger ?? silentLogger;
 
   if (!options.webhookSecret) throw new Error("createApp: webhookSecret is required");
+
+  // Built once: the pieces of an office read that do not change per request.
+  const readDeps: OfficeListDeps = {
+    store,
+    access,
+    ...(signIn ? { sessionToken: (req: IncomingMessage) => signIn.sessionToken(req) } : {}),
+  };
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -85,6 +111,11 @@ export function createApp(options: AppOptions): App {
     }
 
     if (path.startsWith("/auth/")) return handleAuth(req, res, url, path);
+
+    if (path === "/offices") {
+      if (req.method !== "GET") return json(res, 405, { error: "method_not_allowed" });
+      return json(res, 200, await listReadableOffices(readDeps, req));
+    }
 
     const office = path.match(/^\/office\/([^/]+)\/([^/]+)$/);
     if (office) {
@@ -199,58 +230,62 @@ export function createApp(options: AppOptions): App {
     } catch (err) {
       // A delivery must still be acknowledged: GitHub retries, and the setup callback
       // and the next delivery are both another chance to record this.
-      console.error("[api] could not record installation", installation.installationId, err);
+      log.error("installation not recorded", {
+        installationId: installation.installationId,
+        ...errorFields(err),
+      });
     }
   }
 
   /**
-   * A snapshot read. Public offices are open — the office is public exactly when a
-   * signed delivery said so (`office.private === false`). Anything else, including an
-   * office whose visibility we have not been told, needs a GitHub token that can see
-   * the repository.
+   * A snapshot read. The decision itself lives in `authorize.ts`, because
+   * `apps/realtime` has to make the identical one when a socket connects; this
+   * function is only the HTTP shape of its answer.
    *
-   * The token comes from one of two places, and both end in the same check: an explicit
-   * `Authorization: Bearer <token>` (a script, `gh auth token`, another service), or the
-   * session cookie of a signed-in browser, whose token the browser never sees. The
-   * header wins when both are present, so a deliberate token is never silently ignored.
-   *
-   * A caller GitHub rejects gets `404 unknown_office`, the same answer as an office
-   * that never had a delivery: whether a private repository exists is itself private,
-   * and that is how GitHub's own API answers.
+   * `forbidden` and `unknown_office` deliberately answer alike: whether a private
+   * repository exists is itself private, and that is how GitHub's own API answers.
    */
   async function handleOffice(req: IncomingMessage, res: ServerResponse, officeId: string): Promise<void> {
-    const state = await store.load(officeId);
-    if (!state) return json(res, 404, { error: "unknown_office", officeId });
+    const result = await authorizeOfficeRead(readDeps, officeId, req);
+    if (result.ok) return json(res, 200, decay(result.state, now()));
 
-    if (state.office.private !== false) {
-      const token = bearerToken(req.headers.authorization) ?? (await signIn?.sessionToken(req));
-      const decision = await access.canRead(officeId, token);
-      if (!decision.allowed) {
-        if (decision.reason === "unauthenticated") {
-          res.setHeader("www-authenticate", 'Bearer realm="repofloor", error="invalid_request"');
-          return json(res, 401, {
-            error: "authentication_required",
-            officeId,
-            ...(signIn ? { signIn: "/auth/github" } : {}),
-          });
-        }
-        if (decision.reason === "unavailable") {
-          return json(res, 503, { error: "access_check_unavailable", officeId });
-        }
+    switch (result.reason) {
+      case "authentication_required":
+        res.setHeader("www-authenticate", 'Bearer realm="repofloor", error="invalid_request"');
+        return json(res, 401, {
+          error: "authentication_required",
+          officeId,
+          ...(signIn ? { signIn: "/auth/github" } : {}),
+        });
+      case "unavailable":
+        return json(res, 503, { error: "access_check_unavailable", officeId });
+      default:
         return json(res, 404, { error: "unknown_office", officeId });
-      }
     }
-
-    return json(res, 200, decay(state, now()));
   }
 
   return {
     store,
     publisher,
     access,
+    authorizeRead: (officeId, req) => authorizeOfficeRead(readDeps, officeId, req),
     handler(req, res) {
+      const started = Date.now();
+      // The pathname only: a query string can carry an OAuth `code` or `state`, and
+      // a credential that reaches the logs has leaked.
+      const path = new URL(req.url ?? "/", "http://localhost").pathname;
+
+      res.on("finish", () => {
+        log.info("request", {
+          method: req.method ?? "?",
+          path,
+          status: res.statusCode,
+          durationMs: Date.now() - started,
+        });
+      });
+
       route(req, res).catch((err: unknown) => {
-        console.error("[api] unhandled", err);
+        log.error("unhandled request error", { method: req.method ?? "?", path, ...errorFields(err) });
         if (!res.headersSent) json(res, 500, { error: "internal_error" });
         else res.end();
       });

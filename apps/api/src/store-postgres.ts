@@ -10,7 +10,7 @@
  */
 
 import type { OfficeState } from "@repofloor/protocol";
-import type { Queryable } from "./db.js";
+import type { PoolLike, Queryable } from "./db.js";
 import type { OfficeStore } from "./store.js";
 
 /** How long applied event ids are kept. GitHub does not re-deliver older than this. */
@@ -56,6 +56,39 @@ export class PostgresOfficeStore implements OfficeStore {
       [eventId],
     );
     return rows.length === 1;
+  }
+
+  /**
+   * One connection, `begin` … `commit`, and a store bound to it.
+   *
+   * `pg_advisory_xact_lock` on the key makes writers for one office queue up across
+   * processes, and it is transaction-scoped, so a crashed connection releases it with
+   * no cleanup of ours. It covers an office's very first delivery too, which a row
+   * lock could not: there is no row yet to lock.
+   *
+   * Needs a pool to check a connection out of: given a bare `Queryable` (a single
+   * client, or a test double) there is nothing to isolate, so `fn` runs inline —
+   * which is also what makes a nested call harmless.
+   */
+  async transaction<T>(key: string, fn: (store: OfficeStore) => Promise<T>): Promise<T> {
+    const pool = this.#db as Partial<PoolLike>;
+    if (typeof pool.connect !== "function") return fn(this);
+
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      try {
+        await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
+        const result = await fn(new PostgresOfficeStore(client, { eventRetentionDays: this.#retentionDays }));
+        await client.query("commit");
+        return result;
+      } catch (err) {
+        await client.query("rollback");
+        throw err;
+      }
+    } finally {
+      client.release();
+    }
   }
 
   async list(): Promise<string[]> {
