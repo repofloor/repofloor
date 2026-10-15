@@ -57,6 +57,18 @@ bundle, with the usual SPA fallback to `index.html` for unknown paths.
   everything else                      ──▶ apps/web/dist   (static, index.html fallback)
 ```
 
+[`Caddyfile`](Caddyfile) is that table, and [`Dockerfile`](Dockerfile) builds the bundle
+and bakes it into a Caddy image that is both the static server and the edge proxy. It is
+the `web` service in the root `docker-compose.yml`, so `docker compose up --build` gives
+you the whole thing on <http://localhost:8080>.
+
+One warning from having got it wrong: **Caddy matches header values case-sensitively**,
+while RFC 9110 makes them case-insensitive. The matcher is `header Connection *pgrade*`,
+not the documented `*Upgrade*`, because browsers send `connection: upgrade` in lower
+case. Wrong, the upgrade lands on `apps/api`, which answers an ordinary `404`, and the
+page shows a floor that never moves with nothing in any log to say why. `pnpm smoke`
+checks it.
+
 Two build-time escapes exist for other arrangements: `VITE_API_BASE` (a path prefix or
 another origin, which then needs CORS of its own) and `VITE_REALTIME_URL` (an absolute
 `ws(s)://` or `http(s)://` address). Both are empty in the deployment above. In

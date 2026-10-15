@@ -15,26 +15,61 @@ WEBHOOK_SECRET=dev-secret docker compose up --build -d
 WEBHOOK_SECRET=dev-secret pnpm smoke
 ```
 
+Then open **<http://localhost:8080>**. That is the whole of Full mode: Postgres, `api`,
+`realtime` and the `web` bundle behind one Caddy.
+
+### One origin, and why `web` is also the proxy
+
+`web` serves the built bundle *and* reverse-proxies the two services
+([`apps/web/Caddyfile`](../apps/web/Caddyfile)). Same origin is required, not preferred:
+the session cookie is `HttpOnly` and `SameSite=Lax` and `apps/api` sends no CORS
+headers, so a page served from anywhere else is permanently signed out.
+
+```
+  /webhook /offices /office/** (GET)   ──▶ api        :8787
+  /auth/**                             ──▶ api        :8787
+  /office/** (Upgrade: websocket)      ──▶ realtime   :8788
+  everything else                      ──▶ the bundle, index.html fallback
+```
+
+The third line is the awkward one: `api` and `realtime` both answer on
+`/office/:owner/:repo`, so the only thing that separates them is the `Upgrade` header.
+**Caddy matches header values case-sensitively** while RFC 9110 makes them
+case-insensitive, so the matcher is `*pgrade*` rather than the documented `*Upgrade*` —
+otherwise it matches a hand-typed `curl` and misses every browser, which send
+`connection: upgrade` in lower case. When this is wrong the handshake goes to `api`,
+which answers an ordinary `404`, and the page shows a floor that never moves. `pnpm
+smoke` checks it.
+
+`api` and `realtime` stay published on 8787 and 8788 for `pnpm smoke` and for poking at
+them directly. Nothing inside the stack uses those published ports.
+
 `pnpm smoke` ([`scripts/smoke.mjs`](../scripts/smoke.mjs)) drives the whole chain
 against the running stack: an unsigned delivery is refused, a signed one is reduced and
 saved, the snapshot reads back, a re-delivery applies nothing, a WebSocket is greeted
 with `hello` + `snapshot`, **a webhook reaches that live socket through `pg_notify`**,
 and a private office is refused on both doors without leaking its name into `/offices`.
+The last four checks repeat the important ones through the proxied origin, including
+that an upgrade and a plain `GET` on the *same* path end up at different services.
+They are skipped, not failed, if nothing answers on `PROXY` (default `:8080`).
 
 The unit suites cover each piece against fakes; this covers the wiring between them,
 which is the part fakes cannot. Run it after `docker compose up`, on a new host, or
 after changing anything about how the services find each other. It writes two offices
 into whatever database the stack points at, so never point it at production.
 
-If port 5432 is already taken on the host — a local Postgres, usually — the compose run
-fails with `Bind for 127.0.0.1:5432 failed`. Publish it somewhere else:
+If a port is already taken on the host — 5432 to a local Postgres and 8080 to anything
+at all, in practice — the run fails with `Bind for 0.0.0.0:8080 failed`. Every published
+port has an override:
 
 ```bash
-WEBHOOK_SECRET=dev-secret POSTGRES_PORT=55432 docker compose up --build -d
+WEBHOOK_SECRET=dev-secret POSTGRES_PORT=55432 WEB_PORT=8090 docker compose up --build -d
+WEBHOOK_SECRET=dev-secret PROXY=http://127.0.0.1:8090 pnpm smoke
 ```
 
-Nothing inside the stack cares: `api` and `realtime` reach Postgres over the compose
-network on 5432 regardless. The published port is only for `psql` from the host.
+`POSTGRES_PORT`, `WEB_PORT`, `API_PORT`, `REALTIME_PORT`. Nothing inside the stack
+cares: the services reach each other over the compose network on their own ports
+regardless, and the published ones are only for reaching in from the host.
 
 ## Backup and restore
 

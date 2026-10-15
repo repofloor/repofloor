@@ -22,6 +22,11 @@ import { createHmac } from "node:crypto";
 
 const API = process.env.API ?? "http://127.0.0.1:8787";
 const WS = process.env.WS ?? "ws://127.0.0.1:8788";
+/**
+ * The one origin apps/web is served from. Checked only if it answers, so this script
+ * still works against a stack brought up without it.
+ */
+const PROXY = process.env.PROXY ?? "http://127.0.0.1:8080";
 const SECRET = process.env.WEBHOOK_SECRET ?? "dev-secret";
 const OFFICE = "repofloor/repofloor";
 
@@ -174,6 +179,74 @@ const refusedSocket = await new Promise((resolve) => {
 check("socket to a private office is refused", refusedSocket === "refused", refusedSocket);
 
 ws.close();
+
+// 11 ── the proxied origin, if this stack has one
+const proxyUp = await fetch(`${PROXY}/healthz`)
+  .then((r) => r.ok)
+  .catch(() => false);
+
+if (!proxyUp) {
+  console.log(`SKIP  proxied origin — nothing answering on ${PROXY}`);
+} else {
+  const page = await fetch(`${PROXY}/`);
+  check(
+    "the page is served from the proxied origin",
+    page.status === 200 && (page.headers.get("content-type") ?? "").includes("text/html"),
+    `${page.status} ${page.headers.get("content-type")}`,
+  );
+
+  // /:owner/:repo is a client-side route, so an unknown path must be index.html.
+  const deep = await fetch(`${PROXY}/repofloor/repofloor`);
+  check("an app route falls back to index.html", deep.status === 200, `got ${deep.status}`);
+
+  const proxiedSnapshot = await fetch(`${PROXY}/office/repofloor/repofloor`);
+  check(
+    "a plain GET on /office/... is proxied to the api",
+    proxiedSnapshot.status === 200 && (await proxiedSnapshot.json()).office?.id === OFFICE,
+    `got ${proxiedSnapshot.status}`,
+  );
+
+  // The one this section exists for. The api and realtime both answer on this path;
+  // only the Upgrade header tells the proxy which one the caller means.
+  const proxiedFrames = [];
+  const proxiedWs = new WebSocket(`${PROXY.replace(/^http/, "ws")}/office/repofloor/repofloor`);
+  proxiedWs.addEventListener("message", (e) => proxiedFrames.push(JSON.parse(e.data)));
+
+  const upgraded = await new Promise((resolve) => {
+    proxiedWs.addEventListener("open", () => resolve(true), { once: true });
+    proxiedWs.addEventListener("error", () => resolve(false), { once: true });
+    setTimeout(() => resolve(false), 5000);
+  });
+  await new Promise((r) => setTimeout(r, 300));
+
+  check(
+    "an upgrade on the SAME path is routed to realtime",
+    upgraded && proxiedFrames[0]?.type === "hello" && proxiedFrames[1]?.type === "snapshot",
+    upgraded ? proxiedFrames.map((f) => f.type).join(", ") : "the upgrade never completed",
+  );
+
+  // And it is a live socket, not just a handshake.
+  const beforeProxied = proxiedFrames.length;
+  await deliver("push", pushPayload(1), `d-${Date.now()}-proxied`);
+  const reached = await Promise.race([
+    new Promise((resolve) => {
+      const poll = setInterval(() => {
+        if (proxiedFrames.length > beforeProxied) {
+          clearInterval(poll);
+          resolve(true);
+        }
+      }, 50);
+    }),
+    new Promise((resolve) => setTimeout(() => resolve(false), 5000)),
+  ]);
+  check(
+    "a webhook reaches a socket through the proxy",
+    reached && proxiedFrames[beforeProxied]?.type === "events",
+    reached ? proxiedFrames[beforeProxied]?.type : "nothing arrived in 5s",
+  );
+
+  proxiedWs.close();
+}
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);

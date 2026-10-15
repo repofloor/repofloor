@@ -52,6 +52,8 @@ Ordered: each sub-phase unblocks the next. 2A is prerequisites the later ones ne
 ### 2D — Run it for real
 - [x] **D1** `docker compose up --build` on a machine with Docker; add `realtime` to the file
       — run 2026-10-15. It needed a `.dockerignore`; `pnpm smoke` now covers the whole chain.
+- [x] **D1b** `apps/web` in the compose file, behind a Caddy that serves the bundle and proxies
+      both services onto one origin — `docker compose up` now gives you a page at :8080
 - [ ] **D2** Create the App on github.com and walk webhook + sign-in once against the real thing
       (everything so far is covered only against a faked GitHub)
 - [ ] **D3** Periodic resync as the App: mint an installation token, rebuild an office from REST

@@ -156,6 +156,27 @@ _Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realti
   transaction, pooled connections survive), and `LISTEN` survives too — the channel belongs to the session,
   not the schema.
 
+## Done (Phase 2D-1b — the stack serves a page)
+
+- `apps/web` is in `docker-compose.yml`. One `web` service, built in two stages: Vite builds the bundle,
+  and Caddy serves it **and** reverse-proxies `api` and `realtime` onto one origin. One service rather
+  than a static server plus a separate proxy — a bundle and the routing in front of it change together,
+  and ADR 0001's constraint is one maintainer.
+- `WEBHOOK_SECRET=dev-secret docker compose up --build` now really is Full mode in one command:
+  **<http://localhost:8080>**. Verified in a browser — the floor renders, and three webhooks delivered to
+  the api moved it live with no reload (screenshot: `docs/assets/full-mode-proxied.jpg`).
+- **The casing bug worth remembering.** Caddy matches header *values* case-sensitively; RFC 9110 makes
+  them case-insensitive. The documented `@websocket` recipe (`header Connection *Upgrade*`) therefore
+  matches a hand-typed `curl` and misses every real client, which send `connection: upgrade` lower case.
+  The matcher is `*pgrade*`. When it is wrong the upgrade lands on `api`, which answers an ordinary
+  `404`, and the page shows a floor that never moves — no error anywhere. `pnpm smoke` now has a check
+  for exactly this, and it is why the smoke test earned its place twice.
+- `pnpm smoke` is 17 checks now; the last four go through the proxied origin, including that an upgrade
+  and a plain `GET` on the *same* path reach different services. They skip rather than fail when no
+  proxy answers, so a services-only stack still passes.
+- `WEB_PORT` joins `POSTGRES_PORT`, `API_PORT` and `REALTIME_PORT`: 8080 is taken on a developer
+  machine about as often as 5432 is.
+
 ## Noted, not scheduled
 
 - **Visual target** ([`docs/VISUAL_TARGET.md`](VISUAL_TARGET.md), 2026-10-15): a pixel-art reference from the

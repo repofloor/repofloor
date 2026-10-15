@@ -1,0 +1,69 @@
+# The one origin everything is served from.
+#
+# apps/web's README explains why this is required rather than optional: the session
+# cookie is HttpOnly and SameSite=Lax and apps/api sends no CORS headers, so a page on
+# another origin would be permanently signed out.
+#
+# The interesting line is the @websocket one. apps/api and apps/realtime BOTH answer on
+# /office/:owner/:repo — a plain GET is the snapshot, an upgrade is the live floor — so
+# the only thing that can tell them apart is the Upgrade header.
+
+{
+	# No automatic HTTPS: TLS belongs to whatever fronts this in a real deployment,
+	# and asking for a certificate for "localhost" would just fail noisily.
+	auto_https off
+	admin off
+}
+
+:8080 {
+	encode gzip
+
+	# An upgrade, as RFC 6455 sends it.
+	#
+	# `*pgrade*` is not a typo, and the casing here cost an afternoon. Caddy's header
+	# matcher compares VALUES case-sensitively, while RFC 6455 and RFC 9110 both make
+	# these values case-insensitive — so the documented `*Upgrade*` recipe matches a
+	# hand-written curl and misses every real client. Browsers and Node send
+	# `connection: upgrade` in lower case. Matching the middle of the word covers both,
+	# and `keep-alive, Upgrade` and the other orderings proxies produce.
+	#
+	# The `Upgrade` value is matched exactly because that one really is lower case
+	# everywhere: the WHATWG fetch spec mandates the literal "websocket".
+	#
+	# Getting this wrong fails in the most expensive way available — the handshake goes
+	# to apps/api, which answers a perfectly ordinary 404, and the page shows a floor
+	# that never moves. `pnpm smoke` has a check for it for exactly that reason.
+	@websocket {
+		header Connection *pgrade*
+		header Upgrade websocket
+	}
+
+	# Both services, one path. Order matters: the matched route wins, the bare one is
+	# the fallback for everything that is not an upgrade.
+	handle /office/* {
+		reverse_proxy @websocket realtime:8788
+		reverse_proxy api:8787
+	}
+
+	# The rest of the api's surface.
+	handle /auth/* {
+		reverse_proxy api:8787
+	}
+	handle /offices {
+		reverse_proxy api:8787
+	}
+	handle /webhook {
+		reverse_proxy api:8787
+	}
+	handle /healthz {
+		reverse_proxy api:8787
+	}
+
+	# Everything else is the bundle, with the SPA fallback: /:owner and /:owner/:repo
+	# are client-side routes, so an unknown path is index.html, not a 404.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

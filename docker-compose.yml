@@ -2,9 +2,18 @@
 #
 #   WEBHOOK_SECRET=dev-secret docker compose up --build
 #
-# Brings up apps/api on http://localhost:8787 and apps/realtime on ws://localhost:8788,
-# against a Postgres on 5432. Migrations run at api startup, so the first boot creates
-# the schema itself. Lite mode needs none of this — see docs/LITE.md.
+# Then open http://localhost:8080 — the whole of Full mode behind one origin.
+#
+# Brings up Postgres, apps/api (8787), apps/realtime (8788) and apps/web behind a Caddy
+# that serves the bundle and proxies both services (8080). Migrations run at api
+# startup, so the first boot creates the schema itself. api and realtime stay published
+# on their own ports for `pnpm smoke` and for poking at them directly; nothing in the
+# stack uses those published ports to reach them.
+#
+# POSTGRES_PORT, WEB_PORT, API_PORT and REALTIME_PORT move anything that collides with
+# something already running on the host.
+#
+# Lite mode needs none of this — see docs/LITE.md.
 #
 # apps/realtime is the WebSocket fan-out on 8788 (ADR 0002): it LISTENs on the same
 # Postgres and asks api to authorize every socket.
@@ -74,6 +83,25 @@ services:
       postgres:
         condition: service_healthy
       api:
+        condition: service_started
+    restart: unless-stopped
+
+  # The bundle, and the one origin everything is served from. Open this, not :8787.
+  #
+  # Same origin is not a preference: the session cookie is HttpOnly and SameSite=Lax
+  # and api sends no CORS headers, so a page served from anywhere else would be
+  # permanently signed out. api and realtime both answer on /office/:owner/:repo, and
+  # this is what routes between them by the Upgrade header — see apps/web/Caddyfile.
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_started
+      realtime:
         condition: service_started
     restart: unless-stopped
 
