@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { emptyOfficeState, type Building, type Office, type OfficeState } from "@repofloor/protocol";
 import { createPool, loadMigrations, migrate, type QueryResult, type Queryable } from "../src/db.ts";
 import { PostgresOfficeStore } from "../src/store-postgres.ts";
+import { PostgresInstallationStore } from "../src/installations.ts";
 
 const building: Building = { id: "repofloor", name: "repofloor", kind: "organization" };
 const office: Office = { id: "repofloor/repofloor", buildingId: "repofloor", name: "repofloor", private: false };
@@ -129,7 +130,7 @@ test("migrate skips files the database has already recorded", async () => {
 });
 
 test(
-  "against a real Postgres: migrations, snapshot round-trip, durable dedup, retention",
+  "against a real Postgres: migrations, snapshot round-trip, durable dedup, retention, installations",
   { skip: process.env["DATABASE_URL"] ? false : "set DATABASE_URL to a throwaway database to run this" },
   async () => {
     const pool = await createPool(process.env["DATABASE_URL"]!);
@@ -167,6 +168,37 @@ test(
         rows.map((r) => r.event_id),
         [eventId],
       );
+
+      // The installations table from migration 002, through its own store.
+      const installations = new PostgresInstallationStore(pool);
+      const installationId = Number(`9${String(Date.now()).slice(-8)}`);
+      await installations.upsert({
+        installationId,
+        accountLogin: `it-${installationId}`,
+        accountId: 99,
+        accountType: "Organization",
+        repositorySelection: "selected",
+        suspended: false,
+      });
+      assert.equal((await installations.get(installationId))?.accountId, 99, "bigints come back as numbers");
+      assert.equal(
+        (await installations.byAccount(`IT-${installationId}`))?.installationId,
+        installationId,
+        "looked up case-insensitively",
+      );
+
+      await installations.upsert({
+        installationId,
+        accountLogin: `it-${installationId}`,
+        accountId: 99,
+        suspended: true,
+      });
+      const suspended = await installations.get(installationId);
+      assert.equal(suspended?.suspended, true, "re-installing updates the row");
+      assert.equal(suspended?.accountType, undefined, "and nulls read back as absent, not null");
+
+      await installations.remove(installationId);
+      assert.equal(await installations.get(installationId), undefined);
 
       await pool.query("delete from applied_events where event_id = $1", [eventId]);
       await pool.query("delete from offices where office_id = $1", [officeId]);

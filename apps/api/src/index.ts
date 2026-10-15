@@ -28,6 +28,56 @@ export {
   type RepoAccess,
 } from "./access.js";
 export {
+  GitHubAppAuth,
+  normalizePem,
+  APP_JWT_BACKDATE_SECONDS,
+  APP_JWT_TTL_SECONDS,
+  INSTALLATION_TOKEN_SKEW_MS,
+  type GitHubAppAuthOptions,
+} from "./app-auth.js";
+export {
+  installationFromPayload,
+  InMemoryInstallationStore,
+  PostgresInstallationStore,
+  type Installation,
+  type InstallationStore,
+} from "./installations.js";
+export {
+  GitHubOAuth,
+  DEFAULT_GITHUB_WEB_URL,
+  type GitHubOAuthOptions,
+  type GitHubUser,
+} from "./oauth.js";
+export {
+  InMemorySessionStore,
+  newNonce,
+  parseCookies,
+  serializeCookie,
+  signValue,
+  unsignValue,
+  DEFAULT_SESSION_TTL_MS,
+  type CookieOptions,
+  type InMemorySessionStoreOptions,
+  type NewSession,
+  type Session,
+  type SessionStore,
+} from "./session.js";
+export {
+  SignIn,
+  OAUTH_STATE_COOKIE,
+  OAUTH_STATE_TTL_SECONDS,
+  SESSION_COOKIE,
+  type SignInOptions,
+} from "./sign-in.js";
+export {
+  addCookie,
+  header,
+  json,
+  readBody,
+  redirect,
+  safeReturnTo,
+} from "./http.js";
+export {
   InMemoryEventPublisher,
   NoopEventPublisher,
   type EventPublisher,

@@ -35,6 +35,17 @@ services:
       DATABASE_URL: postgres://repofloor:repofloor@postgres:5432/repofloor
       PORT: "8787"
       HOST: 0.0.0.0
+      # Optional: "Sign in with GitHub". All four together or none at all; without them
+      # every caller presents its own token, as before. See apps/api/README.md.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      # Optional: acting as the App, to record installations and mint installation
+      # tokens. Id and key together or neither.
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
     ports:
       - "${API_PORT:-8787}:8787"
     depends_on:

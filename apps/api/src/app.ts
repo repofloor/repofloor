@@ -1,24 +1,32 @@
 /**
- * The HTTP surface of apps/api. Plain `node:http`, no framework: the whole service is
- * three routes, and every dependency it has is an interface declared in this package.
+ * The HTTP surface of apps/api. Plain `node:http`, no framework: every dependency it
+ * has is an interface declared in this package.
  *
- *   POST /webhook              GitHub App deliveries (signature required)
- *   GET  /office/:owner/:repo  the current snapshot, as OfficeState JSON
- *                              (a private office needs a GitHub token; see access.ts)
- *   GET  /healthz              liveness
+ *   POST /webhook                GitHub App deliveries (signature required)
+ *   GET  /office/:owner/:repo    the current snapshot, as OfficeState JSON
+ *                                (a private office needs a GitHub token or a session)
+ *   GET  /auth/github            start "Sign in with GitHub"       ─┐
+ *   GET  /auth/github/callback   finish it, open a session          │ only when sign-in
+ *   GET  /auth/me                who is signed in                   │ is configured
+ *   POST /auth/logout            end the session                    │ (see sign-in.ts)
+ *   GET  /auth/install           send the owner to install the App  │
+ *   GET  /auth/install/callback  the App's Setup URL               ─┘
+ *   GET  /healthz                liveness
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { PROTOCOL_VERSION } from "@repofloor/protocol";
 import { decay, type GithubWebhook } from "@repofloor/reducer";
 import { accessInvalidations, bearerToken, GitHubRepoAccess, type RepoAccess } from "./access.js";
+import { header, json, MAX_BODY_BYTES, readBody } from "./http.js";
 import { ingestWebhook } from "./ingest.js";
+import { installationFromPayload, type InstallationStore } from "./installations.js";
 import { NoopEventPublisher, type EventPublisher } from "./publisher.js";
+import type { SignIn } from "./sign-in.js";
 import { InMemoryOfficeStore, type OfficeStore } from "./store.js";
 import { SIGNATURE_HEADER, verifyWebhookSignature } from "./signature.js";
 
-/** GitHub rejects deliveries above 25 MB; so do we, before buffering them. */
-export const MAX_BODY_BYTES = 25 * 1024 * 1024;
+export { MAX_BODY_BYTES };
 
 export interface AppOptions {
   /** The GitHub App webhook secret. Required: without it no delivery can be trusted. */
@@ -31,6 +39,17 @@ export interface AppOptions {
    * configure and no way to run with reads left open.
    */
   access?: RepoAccess;
+  /**
+   * "Sign in with GitHub". Optional: without it the service still works exactly as it
+   * did, with the caller presenting a token on every request, and `/auth/...` answers
+   * `501`. It is never a second ACL — see sign-in.ts.
+   */
+  signIn?: SignIn | undefined;
+  /**
+   * Where `installation` deliveries are recorded. Not an ACL either (CLAUDE.md rule 6):
+   * it is what lets the service later act as the App.
+   */
+  installations?: InstallationStore | undefined;
   /** Injected in tests so responses are deterministic. */
   now?: () => string;
 }
@@ -46,6 +65,8 @@ export function createApp(options: AppOptions): App {
   const store = options.store ?? new InMemoryOfficeStore();
   const publisher = options.publisher ?? new NoopEventPublisher();
   const access = options.access ?? new GitHubRepoAccess();
+  const signIn = options.signIn;
+  const installations = options.installations;
   const now = options.now ?? (() => new Date().toISOString());
 
   if (!options.webhookSecret) throw new Error("createApp: webhookSecret is required");
@@ -55,13 +76,15 @@ export function createApp(options: AppOptions): App {
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
     if (req.method === "GET" && (path === "/healthz" || path === "/")) {
-      return json(res, 200, { ok: true, protocolVersion: PROTOCOL_VERSION });
+      return json(res, 200, { ok: true, protocolVersion: PROTOCOL_VERSION, signIn: signIn !== undefined });
     }
 
     if (path === "/webhook") {
       if (req.method !== "POST") return json(res, 405, { error: "method_not_allowed" });
       return handleWebhook(req, res);
     }
+
+    if (path.startsWith("/auth/")) return handleAuth(req, res, url, path);
 
     const office = path.match(/^\/office\/([^/]+)\/([^/]+)$/);
     if (office) {
@@ -70,6 +93,46 @@ export function createApp(options: AppOptions): App {
     }
 
     return json(res, 404, { error: "not_found" });
+  }
+
+  /**
+   * The sign-in routes. They exist as soon as the path matches, so an operator who has
+   * not configured a client id gets `501 sign_in_not_configured` rather than a `404`
+   * that looks like a typo.
+   */
+  async function handleAuth(
+    req: IncomingMessage,
+    res: ServerResponse,
+    url: URL,
+    path: string,
+  ): Promise<void> {
+    if (!signIn) return json(res, 501, { error: "sign_in_not_configured" });
+
+    const get = req.method === "GET";
+    switch (path) {
+      case "/auth/github":
+        if (!get) return json(res, 405, { error: "method_not_allowed" });
+        return signIn.begin(req, res, url);
+      case "/auth/github/callback":
+        if (!get) return json(res, 405, { error: "method_not_allowed" });
+        return signIn.callback(req, res, url);
+      case "/auth/me":
+        if (!get) return json(res, 405, { error: "method_not_allowed" });
+        return signIn.me(req, res);
+      case "/auth/logout":
+        // POST only: a logout a third-party page can trigger with an image tag is a
+        // nuisance, not a vulnerability, but it is free to avoid.
+        if (req.method !== "POST") return json(res, 405, { error: "method_not_allowed" });
+        return signIn.logout(req, res);
+      case "/auth/install":
+        if (!get) return json(res, 405, { error: "method_not_allowed" });
+        return signIn.install(req, res);
+      case "/auth/install/callback":
+        if (!get) return json(res, 405, { error: "method_not_allowed" });
+        return signIn.installCallback(req, res, url);
+      default:
+        return json(res, 404, { error: "not_found" });
+    }
   }
 
   async function handleWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -106,6 +169,10 @@ export function createApp(options: AppOptions): App {
       access.invalidateOffice(officeId);
     }
 
+    // An installation came or went. This is the signed, authoritative path — the setup
+    // callback is only a convenience for the owner's own browser.
+    if (event === "installation") await recordInstallation(payload as Record<string, unknown>);
+
     const hook: GithubWebhook = { event, deliveryId, payload: payload as Record<string, unknown> };
     const result = await ingestWebhook(hook, { store, publisher });
 
@@ -117,10 +184,35 @@ export function createApp(options: AppOptions): App {
   }
 
   /**
+   * `installation` deliveries: `created`, `deleted`, `suspend`, `unsuspend`,
+   * `new_permissions_accepted`. The payload carries the whole installation object, so
+   * nothing has to be fetched back.
+   */
+  async function recordInstallation(payload: Record<string, unknown>): Promise<void> {
+    if (!installations) return;
+    const installation = installationFromPayload(payload["installation"]);
+    if (!installation) return;
+
+    try {
+      if (payload["action"] === "deleted") await installations.remove(installation.installationId);
+      else await installations.upsert(installation);
+    } catch (err) {
+      // A delivery must still be acknowledged: GitHub retries, and the setup callback
+      // and the next delivery are both another chance to record this.
+      console.error("[api] could not record installation", installation.installationId, err);
+    }
+  }
+
+  /**
    * A snapshot read. Public offices are open — the office is public exactly when a
    * signed delivery said so (`office.private === false`). Anything else, including an
    * office whose visibility we have not been told, needs a GitHub token that can see
    * the repository.
+   *
+   * The token comes from one of two places, and both end in the same check: an explicit
+   * `Authorization: Bearer <token>` (a script, `gh auth token`, another service), or the
+   * session cookie of a signed-in browser, whose token the browser never sees. The
+   * header wins when both are present, so a deliberate token is never silently ignored.
    *
    * A caller GitHub rejects gets `404 unknown_office`, the same answer as an office
    * that never had a delivery: whether a private repository exists is itself private,
@@ -131,11 +223,16 @@ export function createApp(options: AppOptions): App {
     if (!state) return json(res, 404, { error: "unknown_office", officeId });
 
     if (state.office.private !== false) {
-      const decision = await access.canRead(officeId, bearerToken(req.headers.authorization));
+      const token = bearerToken(req.headers.authorization) ?? (await signIn?.sessionToken(req));
+      const decision = await access.canRead(officeId, token);
       if (!decision.allowed) {
         if (decision.reason === "unauthenticated") {
           res.setHeader("www-authenticate", 'Bearer realm="repofloor", error="invalid_request"');
-          return json(res, 401, { error: "authentication_required", officeId });
+          return json(res, 401, {
+            error: "authentication_required",
+            officeId,
+            ...(signIn ? { signIn: "/auth/github" } : {}),
+          });
         }
         if (decision.reason === "unavailable") {
           return json(res, 503, { error: "access_check_unavailable", officeId });
@@ -159,37 +256,4 @@ export function createApp(options: AppOptions): App {
       });
     },
   };
-}
-
-function header(req: IncomingMessage, name: string): string | undefined {
-  const value = req.headers[name];
-  const first = Array.isArray(value) ? value[0] : value;
-  return first && first.length > 0 ? first : undefined;
-}
-
-function json(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "content-length": Buffer.byteLength(payload),
-  });
-  res.end(payload);
-}
-
-function readBody(req: IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        reject(new Error("body_too_large"));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
-  });
 }

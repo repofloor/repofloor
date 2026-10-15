@@ -1,6 +1,6 @@
 # Handoff — where the project stands
 
-_Last updated: 2026-10-15 (Phase 2: ADR 0001, apps/api skeleton, Postgres store + authorized reads)._
+_Last updated: 2026-10-15 (Phase 2: ADR 0001, apps/api skeleton, Postgres store, authorized reads, sign-in + App installation)._
 
 ## Done (Phase 0)
 
@@ -34,11 +34,23 @@ _Last updated: 2026-10-15 (Phase 2: ADR 0001, apps/api skeleton, Postgres store 
   `GET /repos/{owner}/{repo}` with the caller's own `Authorization: Bearer <token>`, caches the answer per
   (caller, repo) for 60s and drops it on `installation_repositories` / `member` deliveries. No permissions
   table — GitHub stays the only ACL. Public offices need no token; unknown visibility is treated as private.
-  A refused caller gets the same `404` as a non-existent office. The token *is* the identity for now: no
-  session flow yet, which is the honest seam and a later slice.
+  A refused caller gets the same `404` as a non-existent office.
+- **Sign-in and App installation** (next step 2c, done): "Sign in with GitHub" through the App's OAuth leg —
+  `/auth/github` → `/auth/github/callback` → a server-side session behind a signed, `HttpOnly` cookie that
+  holds an opaque id and nothing else, so the browser never sees the GitHub token. `GET /office/...` accepts
+  that session *or* the bearer token it accepted before, and both still end in the same `RepoAccess.canRead`:
+  a session is an identity, not a permission, and there is still no permissions table (rule 6 intact).
+  `/auth/me`, `POST /auth/logout` (destroys the record server-side), `/auth/install`, and the App's Setup URL
+  `/auth/install/callback`, which reads the installation back from GitHub as the App rather than trusting the
+  unsigned `installation_id`. Installations are persisted by migration `002_installations.sql` and by the
+  signed `installation` delivery; installation tokens are minted from the private key (RS256 JWT via
+  `node:crypto`) and cached **in memory**, so the database holds no credential at all. Still no new runtime
+  dependency — `pg` remains the only one.
 - `docker-compose.yml` + `apps/api/Dockerfile`: `WEBHOOK_SECRET=dev-secret docker compose up --build` brings up
   api + Postgres. Written but not run — no Docker daemon on the machine that wrote it.
-- 37 tests in `apps/api` (one skipped: the Postgres integration test runs only with `DATABASE_URL` set).
+- 91 tests in `apps/api` (one skipped: the Postgres integration test runs only with `DATABASE_URL` set).
+  No live GitHub and no live database in CI: GitHub is faked, and the App JWT is verified against a keypair
+  generated inside the test.
 
 ## Not yet done / known rough edges
 
@@ -51,21 +63,34 @@ _Last updated: 2026-10-15 (Phase 2: ADR 0001, apps/api skeleton, Postgres store 
   effect. Needs a transaction across the ingest loop (an `OfficeStore` change) or the planned periodic resync.
 - `apps/api`: `store.list()` has no HTTP route yet, and the read check lives inside `handleOffice` — lift it
   out when `apps/realtime` needs the same check at socket connect.
+- `apps/api`: sessions live in memory, so a restart signs everyone out and more than one instance needs
+  sticky sessions. Deliberate — it keeps every credential out of the database — but it is the first thing to
+  revisit when the service is run in more than one place.
+- `apps/api`: the sign-in flow has never been run against the real github.com. Everything is covered against
+  a faked GitHub; creating the App and walking the redirect once is still owed.
 - `monitors` map redraw happens per `setState` for every actor — cheap, but could be diffed.
 
 ## Immediate next steps (suggested order)
 
 1. Phase 1 quick wins: bubble stagger, A* walking (#5), night tint (#4), text alternative under the canvas (#15).
-2. Phase 2, next slices of `apps/api` (the ADR, the skeleton, the Postgres store and authorized reads are done):
-   a. **GitHub App manifest + install flow**; persist installations and their tokens. That is also what turns
-      "the caller presents a token" into a real session: a sign-in flow, a cookie, and a token the browser
-      never sees.
-   b. **`apps/realtime`**: WebSocket fan-out per office consuming `EventPublisher` (Postgres `LISTEN`/`NOTIFY`
+2. Phase 2, next slices of `apps/api` (the ADR, the skeleton, the Postgres store, authorized reads and
+   sign-in + installations are done):
+   a. **`apps/realtime`**: WebSocket fan-out per office consuming `EventPublisher` (Postgres `LISTEN`/`NOTIFY`
       first), presence with TTL. The same read check must gate a socket at connect time, so lift it out of
-      `handleOffice` when it is needed in two places.
-   c. Run `docker compose up --build` once on a machine with Docker and fix whatever the build reveals; add
+      `handleOffice` when it is needed in two places — and a socket should be able to authenticate with the
+      session cookie, which now exists.
+   b. **`apps/web`**: the first consumer of sign-in. A page that mounts the engine against
+      `GET /office/:owner/:repo`, with `/auth/github` behind a button and `/auth/me` deciding what to show.
+      It is also what turns `/auth/install/callback`'s JSON into a real landing page (pass `return_to`).
+   c. **Sessions across restarts and instances**, if and when it hurts: a `SessionStore` on Postgres with the
+      user token encrypted at rest, or refresh tokens so a session holds a short-lived credential. Today a
+      restart signs people out and two instances need sticky sessions.
+   d. **Use the App identity for something**: a periodic resync that mints an installation token and rebuilds
+      an office from the REST API (the same `collect.ts` shape Lite uses), which also closes the
+      `markDelivered`/`save` gap below.
+   e. Run `docker compose up --build` once on a machine with Docker and fix whatever the build reveals; add
       `realtime` to the compose file when it exists.
-   d. Operational leftovers: a `GET /offices` listing (the store's `list` has no route), structured logs,
+   f. Operational leftovers: a `GET /offices` listing (the store's `list` has no route), structured logs,
       and a documented single-command Postgres restore (ADR 0001 promises one).
 
 ## Decisions already made
