@@ -1,6 +1,6 @@
 # Handoff — where the project stands
 
-_Last updated: 2026-10-15 (Phase 2 kick-off: ADR 0001 + apps/api skeleton)._
+_Last updated: 2026-10-15 (Phase 2: ADR 0001, apps/api skeleton, Postgres store + authorized reads)._
 
 ## Done (Phase 0)
 
@@ -24,7 +24,21 @@ _Last updated: 2026-10-15 (Phase 2 kick-off: ADR 0001 + apps/api skeleton)._
 - `apps/api` skeleton, no runtime dependencies beyond the two workspace packages: HMAC-SHA256 signature
   verification over the raw body (`WEBHOOK_SECRET`), `githubToEvents` + `reduce` into an office snapshot,
   dedup on delivery-derived event ids, `POST /webhook`, `GET /office/:owner/:repo` (with decay on read),
-  `GET /healthz`. 12 tests. `apps/api/README.md` has the GitHub App setup and local tunnel instructions.
+  `GET /healthz`. `apps/api/README.md` has the GitHub App setup and local tunnel instructions.
+- **Postgres behind `OfficeStore`** (next step 2a, done): `PostgresOfficeStore` on plain SQL — `offices`
+  (snapshot as `jsonb`) and `applied_events` (primary key on the event id, so dedup survives a restart),
+  numbered `.sql` migrations applied at startup by a small runner, an hourly retention cut on old event ids.
+  `pg` is the only new dependency and is imported lazily; without `DATABASE_URL` the in-memory store is used
+  and `pg` is never loaded. The `OfficeStore` interface is unchanged.
+- **Authorized reads** (next step 2b, done): `GET /office/:owner/:repo` asks GitHub
+  `GET /repos/{owner}/{repo}` with the caller's own `Authorization: Bearer <token>`, caches the answer per
+  (caller, repo) for 60s and drops it on `installation_repositories` / `member` deliveries. No permissions
+  table — GitHub stays the only ACL. Public offices need no token; unknown visibility is treated as private.
+  A refused caller gets the same `404` as a non-existent office. The token *is* the identity for now: no
+  session flow yet, which is the honest seam and a later slice.
+- `docker-compose.yml` + `apps/api/Dockerfile`: `WEBHOOK_SECRET=dev-secret docker compose up --build` brings up
+  api + Postgres. Written but not run — no Docker daemon on the machine that wrote it.
+- 37 tests in `apps/api` (one skipped: the Postgres integration test runs only with `DATABASE_URL` set).
 
 ## Not yet done / known rough edges
 
@@ -33,19 +47,26 @@ _Last updated: 2026-10-15 (Phase 2 kick-off: ADR 0001 + apps/api skeleton)._
 - `applyEffect` is called by the demo; Lite page never calls it (no live events) — fine for now.
 - No engine unit tests (visual package). A Playwright screenshot workflow is issue #16.
 - Lite `collect.ts` does not page beyond 100 commits / 50 PRs / 50 issues / 20 runs.
+- `apps/api`: `markDelivered` then `save` are two statements. A crash in between loses that one event's
+  effect. Needs a transaction across the ingest loop (an `OfficeStore` change) or the planned periodic resync.
+- `apps/api`: `store.list()` has no HTTP route yet, and the read check lives inside `handleOffice` — lift it
+  out when `apps/realtime` needs the same check at socket connect.
 - `monitors` map redraw happens per `setState` for every actor — cheap, but could be diffed.
 
 ## Immediate next steps (suggested order)
 
 1. Phase 1 quick wins: bubble stagger, A* walking (#5), night tint (#4), text alternative under the canvas (#15).
-2. Phase 2, next slices of `apps/api` (the ADR and the skeleton are done):
-   a. **Postgres behind `OfficeStore`** — snapshot per office + a unique index on the delivery id, so dedup
-      and snapshots survive a restart. Today everything is in memory.
-   b. **Authorize `GET /office/:owner/:repo`** against GitHub repo access (cached, 60s TTL, invalidated on
-      `installation_repositories` / `member`). Until then the service is only safe on public repos.
-   c. GitHub App manifest + install flow; persist installations and their tokens.
-   d. `apps/realtime`: WebSocket fan-out per office consuming `EventPublisher`, presence with TTL.
-   e. `docker-compose.yml`: api + realtime + Postgres.
+2. Phase 2, next slices of `apps/api` (the ADR, the skeleton, the Postgres store and authorized reads are done):
+   a. **GitHub App manifest + install flow**; persist installations and their tokens. That is also what turns
+      "the caller presents a token" into a real session: a sign-in flow, a cookie, and a token the browser
+      never sees.
+   b. **`apps/realtime`**: WebSocket fan-out per office consuming `EventPublisher` (Postgres `LISTEN`/`NOTIFY`
+      first), presence with TTL. The same read check must gate a socket at connect time, so lift it out of
+      `handleOffice` when it is needed in two places.
+   c. Run `docker compose up --build` once on a machine with Docker and fix whatever the build reveals; add
+      `realtime` to the compose file when it exists.
+   d. Operational leftovers: a `GET /offices` listing (the store's `list` has no route), structured logs,
+      and a documented single-command Postgres restore (ADR 0001 promises one).
 
 ## Decisions already made
 

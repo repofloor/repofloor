@@ -4,12 +4,14 @@
  *
  *   POST /webhook              GitHub App deliveries (signature required)
  *   GET  /office/:owner/:repo  the current snapshot, as OfficeState JSON
+ *                              (a private office needs a GitHub token; see access.ts)
  *   GET  /healthz              liveness
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { PROTOCOL_VERSION } from "@repofloor/protocol";
 import { decay, type GithubWebhook } from "@repofloor/reducer";
+import { accessInvalidations, bearerToken, GitHubRepoAccess, type RepoAccess } from "./access.js";
 import { ingestWebhook } from "./ingest.js";
 import { NoopEventPublisher, type EventPublisher } from "./publisher.js";
 import { InMemoryOfficeStore, type OfficeStore } from "./store.js";
@@ -23,6 +25,12 @@ export interface AppOptions {
   webhookSecret: string;
   store?: OfficeStore;
   publisher?: EventPublisher;
+  /**
+   * The repo-read check for `GET /office/...`. Defaults to asking GitHub with the
+   * caller's own token — it needs no credentials of ours, so there is nothing to
+   * configure and no way to run with reads left open.
+   */
+  access?: RepoAccess;
   /** Injected in tests so responses are deterministic. */
   now?: () => string;
 }
@@ -31,11 +39,13 @@ export interface App {
   handler: (req: IncomingMessage, res: ServerResponse) => void;
   store: OfficeStore;
   publisher: EventPublisher;
+  access: RepoAccess;
 }
 
 export function createApp(options: AppOptions): App {
   const store = options.store ?? new InMemoryOfficeStore();
   const publisher = options.publisher ?? new NoopEventPublisher();
+  const access = options.access ?? new GitHubRepoAccess();
   const now = options.now ?? (() => new Date().toISOString());
 
   if (!options.webhookSecret) throw new Error("createApp: webhookSecret is required");
@@ -56,7 +66,7 @@ export function createApp(options: AppOptions): App {
     const office = path.match(/^\/office\/([^/]+)\/([^/]+)$/);
     if (office) {
       if (req.method !== "GET") return json(res, 405, { error: "method_not_allowed" });
-      return handleOffice(res, `${decodeURIComponent(office[1]!)}/${decodeURIComponent(office[2]!)}`);
+      return handleOffice(req, res, `${decodeURIComponent(office[1]!)}/${decodeURIComponent(office[2]!)}`);
     }
 
     return json(res, 404, { error: "not_found" });
@@ -91,6 +101,11 @@ export function createApp(options: AppOptions): App {
       return json(res, 400, { error: "invalid_json" });
     }
 
+    // Access changed? Drop the cached decisions now rather than waiting out the TTL.
+    for (const officeId of accessInvalidations(event, payload as Record<string, unknown>)) {
+      access.invalidateOffice(officeId);
+    }
+
     const hook: GithubWebhook = { event, deliveryId, payload: payload as Record<string, unknown> };
     const result = await ingestWebhook(hook, { store, publisher });
 
@@ -101,17 +116,41 @@ export function createApp(options: AppOptions): App {
     });
   }
 
-  async function handleOffice(res: ServerResponse, officeId: string): Promise<void> {
+  /**
+   * A snapshot read. Public offices are open — the office is public exactly when a
+   * signed delivery said so (`office.private === false`). Anything else, including an
+   * office whose visibility we have not been told, needs a GitHub token that can see
+   * the repository.
+   *
+   * A caller GitHub rejects gets `404 unknown_office`, the same answer as an office
+   * that never had a delivery: whether a private repository exists is itself private,
+   * and that is how GitHub's own API answers.
+   */
+  async function handleOffice(req: IncomingMessage, res: ServerResponse, officeId: string): Promise<void> {
     const state = await store.load(officeId);
     if (!state) return json(res, 404, { error: "unknown_office", officeId });
-    // TODO(full-mode): authorize this read against GitHub repo access (ADR 0001).
-    // Until then the service is only safe to run against public repositories.
+
+    if (state.office.private !== false) {
+      const decision = await access.canRead(officeId, bearerToken(req.headers.authorization));
+      if (!decision.allowed) {
+        if (decision.reason === "unauthenticated") {
+          res.setHeader("www-authenticate", 'Bearer realm="repofloor", error="invalid_request"');
+          return json(res, 401, { error: "authentication_required", officeId });
+        }
+        if (decision.reason === "unavailable") {
+          return json(res, 503, { error: "access_check_unavailable", officeId });
+        }
+        return json(res, 404, { error: "unknown_office", officeId });
+      }
+    }
+
     return json(res, 200, decay(state, now()));
   }
 
   return {
     store,
     publisher,
+    access,
     handler(req, res) {
       route(req, res).catch((err: unknown) => {
         console.error("[api] unhandled", err);

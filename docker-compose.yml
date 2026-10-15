@@ -1,0 +1,46 @@
+# Full mode, locally, in one command:
+#
+#   WEBHOOK_SECRET=dev-secret docker compose up --build
+#
+# Brings up apps/api on http://localhost:8787 against a Postgres on 5432. Migrations run
+# at api startup, so the first boot creates the schema itself. Lite mode needs none of
+# this — see docs/LITE.md.
+#
+# apps/realtime joins this file when it exists (ADR 0001).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: repofloor
+      POSTGRES_PASSWORD: repofloor
+      POSTGRES_DB: repofloor
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repofloor -d repofloor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      # Required. The GitHub App webhook secret; the service refuses to start without it.
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:?set WEBHOOK_SECRET, the same value as your GitHub App webhook secret}
+      DATABASE_URL: postgres://repofloor:repofloor@postgres:5432/repofloor
+      PORT: "8787"
+      HOST: 0.0.0.0
+    ports:
+      - "${API_PORT:-8787}:8787"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

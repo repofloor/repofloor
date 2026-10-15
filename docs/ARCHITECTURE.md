@@ -68,7 +68,7 @@ PR reviews spawn transient meeting rooms.
 ### Services
 | Service | Responsibility | Notes |
 |---|---|---|
-| `apps/api` | Verify webhook signatures, `githubToEvents`, persist, publish | Skeleton shipped (in-memory store, no auth on reads yet). Idempotent on delivery id; periodic full resync per office |
+| `apps/api` | Verify webhook signatures, `githubToEvents`, persist, publish | Shipped: Postgres store (in-memory without `DATABASE_URL`), reads authorized against GitHub repo access. Idempotent on delivery id; periodic full resync per office |
 | `apps/realtime` | WebSocket fan-out per office, presence (TTL in Redis), rooms, chat | Presence is never written to Postgres |
 | `apps/web` | Buildings list, office view (engine), profile (emoji, agent tokens) | Thin; most logic is in packages |
 
