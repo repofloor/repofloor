@@ -143,6 +143,8 @@ export class OfficeRenderer {
       seen.add(a.actor.id);
       let av = this.avatars.get(a.actor.id);
       const target = targets.get(a.actor.id)!;
+      // Neighbouring desks alternate label rows; everyone else keeps the first.
+      const seat = layout.desks.find((d) => d.actorId === a.actor.id);
       if (!av) {
         av = new Avatar(a);
         av.on("pointerover", (e) => this.showTooltip(av!, e.global.x, e.global.y));
@@ -153,6 +155,10 @@ export class OfficeRenderer {
         });
         this.avatars.set(a.actor.id, av);
         this.actorLayer.addChild(av);
+        // Keyed on the column *and* the row: the two people at one slot of a pod
+        // face each other across the same desk and so share a tx, which a
+        // column-only key put on the same label line.
+        av.setLabelRow(seat ? Math.round(seat.tx / 3) + (seat.facing === "up" ? 1 : 0) : 0);
         // New actors walk in through the entrance, which is a gap in the bottom wall
         // rather than a prop now that the shell is drawn from the cell grid.
         av.moveTo(layout.entrance.tx, layout.entrance.ty - 1, true);
@@ -201,8 +207,11 @@ export class OfficeRenderer {
     for (const a of state.actors) {
       let t = this.targetFor(a, layout);
       for (let i = 1; taken.has(`${t.tx},${t.ty}`) && i <= 12; i++) {
-        // deterministic nudge: right, left, right… then down a row
-        const dx = (i % 2 ? 1 : -1) * Math.ceil(i / 2);
+        // Deterministic nudge: right, left, right… then down a row. Two tiles at a
+        // time, because an avatar is nearly a tile wide and a one-tile nudge leaves
+        // the two of them still on top of each other — which looked like a seating
+        // bug rather than like the collision it is.
+        const dx = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 2;
         const tx = clamp(t.tx + dx, 1, layout.cols - 2);
         const ty = clamp(t.ty + (i > 6 ? 1 : 0), 1, layout.rows - 2);
         t = { tx, ty };
@@ -246,29 +255,52 @@ export class OfficeRenderer {
     const g = this.floorLayer.clear();
 
     // ── floor ──────────────────────────────────────────────────────────────
-    // One pass over the grid. Each cell kind gets its own material, which is what
-    // makes a room read as a room rather than as a tinted rectangle.
+    // One pass over the grid. Each cell kind gets its own material, and each material
+    // gets a little surface detail — grout between corridor tiles, plank seams in the
+    // open plan, a weave in the carpeted rooms. Flat colour is what makes procedural
+    // art look procedural; a single line per tile is most of the way out of it.
     for (let y = 0; y < layout.rows; y++) {
       for (let x = 0; x < layout.cols; x++) {
         const cell = cellAt(layout, x, y);
         if (cell === "wall" || cell === "outside") continue;
+        const px = x * TILE;
+        const py = y * TILE;
         const checker = (x + y) % 2 === 0;
-        let fill: number;
+
         if (cell === "corridor" || cell === "door") {
-          fill = checker ? PALETTE.corridor : PALETTE.corridorAlt;
-        } else if (cell === "room") {
+          g.rect(px, py, TILE, TILE).fill(checker ? PALETTE.corridor : PALETTE.corridorAlt);
+          // Grout: the tile edges, not a grid drawn over the top.
+          g.rect(px, py, TILE, 1).fill(PALETTE.grout);
+          g.rect(px, py, 1, TILE).fill(PALETTE.grout);
+          continue;
+        }
+
+        if (cell === "room") {
           const box = layout.rooms[layout.roomIndex[y * layout.cols + x] ?? -1];
           const kind = box?.room.kind;
-          fill =
-            kind === "meeting"
-              ? PALETTE.roomFloorMeeting
-              : kind === "focus"
-                ? PALETTE.roomFloorFocus
-                : PALETTE.roomFloorTeam;
-        } else {
-          fill = checker ? PALETTE.openFloor : PALETTE.openFloorAlt;
+          if (kind === "focus") {
+            g.rect(px, py, TILE, TILE).fill(PALETTE.roomFloorFocus);
+            // Carpet: a sparse weave rather than a texture, so it reads at any zoom.
+            for (let i = 2; i < TILE; i += 5) {
+              g.rect(px + i, py + ((x + y) % 2) + 1, 1, 1).fill(PALETTE.carpetWeave);
+              g.rect(px + i - 2, py + 6 + ((x * y) % 3), 1, 1).fill(PALETTE.carpetWeave);
+            }
+          } else if (kind === "meeting") {
+            g.rect(px, py, TILE, TILE).fill(PALETTE.roomFloorMeeting);
+            g.rect(px, py + TILE - 1, TILE, 1).fill(PALETTE.grout);
+          } else {
+            g.rect(px, py, TILE, TILE).fill(PALETTE.roomFloorTeam);
+            g.rect(px, py + TILE - 1, TILE, 1).fill(PALETTE.grout);
+          }
+          continue;
         }
-        g.rect(x * TILE, y * TILE, TILE, TILE).fill(fill);
+
+        // Open plan: boards running east-west, offset row to row so the seams do not
+        // line up into one long stripe across the floor.
+        g.rect(px, py, TILE, TILE).fill(checker ? PALETTE.openFloor : PALETTE.openFloorAlt);
+        g.rect(px, py + TILE - 1, TILE, 1).fill(PALETTE.plank);
+        const seam = ((x * 7 + y * 3) % 2) * (TILE / 2);
+        g.rect(px + seam, py, 1, TILE).fill(PALETTE.plank);
       }
     }
 
@@ -276,6 +308,11 @@ export class OfficeRenderer {
     // A wall is a dark body plus a lit edge on whichever side faces into a space.
     // Seen from directly above that edge is the only cue for height, and without it
     // the plan flattens into outlines.
+    //
+    // Three things are drawn on top of that, and each one says what a wall *is*
+    // rather than only where it runs: a skirting board where it meets the floor, a
+    // glass band where it encloses a meeting room, and windows where it is the
+    // outside of the building.
     for (let y = 0; y < layout.rows; y++) {
       for (let x = 0; x < layout.cols; x++) {
         if (cellAt(layout, x, y) !== "wall") continue;
@@ -288,10 +325,47 @@ export class OfficeRenderer {
           return n !== "wall" && n !== "outside";
         };
         const E = 3;
-        if (lit(0, 1)) g.rect(px, py + TILE - E, TILE, E).fill(PALETTE.wallEdge);
+        if (lit(0, 1)) {
+          g.rect(px, py + TILE - E, TILE, E).fill(PALETTE.wallEdge);
+          // Skirting: one pixel where the wall meets the floor it faces.
+          g.rect(px, py + TILE - 1, TILE, 1).fill(PALETTE.skirting);
+        }
         if (lit(0, -1)) g.rect(px, py, TILE, E - 1).fill(PALETTE.wallTop);
         if (lit(-1, 0)) g.rect(px, py, E - 1, TILE).fill(PALETTE.wallTop);
         if (lit(1, 0)) g.rect(px + TILE - (E - 1), py, E - 1, TILE).fill(PALETTE.wallTop);
+
+        const onShell = x === 0 || y === 0 || x === layout.cols - 1 || y === layout.rows - 1;
+
+        // A meeting room is the one people look into, so its walls are glazed. Which
+        // room a wall belongs to is whatever room it is facing.
+        const facesRoom = (dx: number, dy: number): string | undefined => {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (cellAt(layout, nx, ny) !== "room") return undefined;
+          return layout.rooms[layout.roomIndex[ny * layout.cols + nx] ?? -1]?.room.kind;
+        };
+        const glazed = !onShell && (facesRoom(0, 1) === "meeting" || facesRoom(0, -1) === "meeting");
+        if (glazed) {
+          g.rect(px + 1, py + 5, TILE - 2, TILE - 10).fill({ color: PALETTE.glass, alpha: 0.45 });
+          g.rect(px + 1, py + 5, TILE - 2, 1).fill({ color: PALETTE.windowPane, alpha: 0.5 });
+        }
+
+        // Windows, every third tile along the outside walls, skipping corners.
+        if (onShell && !glazed) {
+          const horizontal = y === 0 || y === layout.rows - 1;
+          const along = horizontal ? x : y;
+          const atCorner =
+            (x === 0 || x === layout.cols - 1) && (y === 0 || y === layout.rows - 1);
+          if (!atCorner && along % 5 === 2) {
+            if (horizontal) {
+              g.rect(px + 3, py + 5, TILE - 6, TILE - 11).fill({ color: PALETTE.windowPane, alpha: 0.4 });
+              g.rect(px + 3, py + 5, TILE - 6, 1).fill({ color: PALETTE.glass, alpha: 0.6 });
+            } else {
+              g.rect(px + 5, py + 3, TILE - 11, TILE - 6).fill({ color: PALETTE.windowPane, alpha: 0.4 });
+              g.rect(px + 5, py + 3, 1, TILE - 6).fill({ color: PALETTE.glass, alpha: 0.6 });
+            }
+          }
+        }
       }
     }
 
@@ -321,24 +395,47 @@ export class OfficeRenderer {
     // ── desks ──────────────────────────────────────────────────────────────
     // A pod seats two rows facing each other, so the desk is above the chair for the
     // back row and below it for the front row.
+    //
+    // Everything here sits *on* the floor rather than in it, which is what the drop
+    // shadows are for. One soft offset shape under each object does more for how
+    // finished a scene looks than any amount of detail on the object itself.
     for (const d of layout.desks) {
       const dg = new Graphics();
       const cx = d.tx * TILE;
       const cy = d.ty * TILE;
       const deskY = d.facing === "up" ? cy - TILE : cy + TILE;
 
+      // Desk: shadow, surface, front edge, and a lighter band along the back so the
+      // top reads as a surface catching light rather than as a flat slab.
+      dg.rect(cx - TILE + 2, deskY + TILE - 1, TILE * 3, 3).fill({ color: PALETTE.shadow, alpha: 0.35 });
       dg.rect(cx - TILE, deskY + 4, TILE * 3, TILE - 4).fill(PALETTE.deskWood);
+      dg.rect(cx - TILE, deskY + 4, TILE * 3, 2).fill(0x9d6b45);
       dg.rect(cx - TILE, deskY + TILE - 3, TILE * 3, 3).fill(PALETTE.deskWoodDark);
 
       // The partition between the two rows: low, so avatars stay visible over it.
-      if (d.facing === "up") dg.rect(cx - TILE, deskY + 1, TILE * 3, 3).fill(PALETTE.metalDark);
+      if (d.facing === "up") {
+        dg.rect(cx - TILE, deskY + 1, TILE * 3, 3).fill(PALETTE.metalDark);
+        dg.rect(cx - TILE, deskY + 1, TILE * 3, 1).fill(PALETTE.metal);
+      }
 
       const mon = new Graphics();
       mon.position.set(cx, deskY);
       this.monitors.set(d.actorId, mon);
       this.drawMonitor(mon, state.actors.find((a) => a.actor.id === d.actorId));
 
-      dg.rect(cx + 3, cy + 2, TILE - 6, TILE - 4).fill(PALETTE.chair);
+      // Chair: a seat with a back and two arms, seen from above. The old one was a
+      // rectangle, which from directly overhead is indistinguishable from a box.
+      const chairX = cx + 2;
+      const chairY = cy + 1;
+      dg.rect(chairX + 1, chairY + TILE - 4, TILE - 4, 3).fill({ color: PALETTE.shadow, alpha: 0.3 });
+      dg.roundRect(chairX, chairY + 2, TILE - 4, TILE - 6, 2).fill(PALETTE.chair);
+      dg.roundRect(chairX + 1, chairY + 3, TILE - 6, TILE - 9, 1).fill(0x4b5263);
+      // The back is on whichever side the desk is not.
+      const backY = d.facing === "up" ? chairY + TILE - 5 : chairY + 1;
+      dg.roundRect(chairX - 1, backY, TILE - 2, 3, 1).fill(PALETTE.metalDark);
+      dg.rect(chairX - 1, chairY + 4, 2, TILE - 10).fill(PALETTE.metalDark);
+      dg.rect(chairX + TILE - 5, chairY + 4, 2, TILE - 10).fill(PALETTE.metalDark);
+
       this.propsLayer.addChild(dg, mon);
     }
 
@@ -351,31 +448,78 @@ export class OfficeRenderer {
     }
 
     // ── props ──────────────────────────────────────────────────────────────
+    // Each one gets a shadow first, then its shape. The shapes are deliberately not
+    // symmetrical: a plant with three identical blobs reads as a pattern, one with a
+    // taller leaf on one side reads as a plant.
     for (const p of layout.props) {
       const pg = new Graphics();
       const x = p.tx * TILE;
       const y = p.ty * TILE;
+      const shade = (sx: number, sy: number, w: number, h: number, alpha = 0.33): void => {
+        pg.ellipse(x + sx + w / 2, y + sy + h, w / 2, h / 3).fill({ color: PALETTE.shadow, alpha });
+      };
+
       if (p.kind === "plant") {
-        pg.rect(x + 5, y + 9, 6, 6).fill(PALETTE.pot).circle(x + 8, y + 6, 5).fill(PALETTE.plant).circle(x + 5, y + 8, 3).fill(PALETTE.plantDark);
+        // Pot, soil, and three leaves of different sizes leaning off-centre.
+        shade(3, 12, 10, 4);
+        pg.rect(x + 5, y + 9, 6, 6).fill(PALETTE.pot);
+        pg.rect(x + 5, y + 9, 6, 1).fill(0xbe6b3a);
+        pg.rect(x + 6, y + 8, 4, 1).fill(0x4a3326);
+        pg.circle(x + 8, y + 5, 4).fill(PALETTE.plant);
+        pg.circle(x + 5, y + 7, 3).fill(PALETTE.plantDark);
+        pg.circle(x + 11, y + 7, 2).fill(PALETTE.plantDark);
+        pg.circle(x + 9, y + 2, 2).fill(0x4fb86b);
       } else if (p.kind === "coffee") {
-        pg.rect(x + 2, y + 2, 12, 14).fill(PALETTE.metalDark).rect(x + 4, y + 4, 8, 4).fill(PALETTE.monitor).rect(x + 6, y + 10, 4, 3).fill(0xf5f5f4);
+        shade(2, 15, 12, 4);
+        pg.rect(x + 2, y + 2, 12, 14).fill(PALETTE.metalDark);
+        pg.rect(x + 2, y + 2, 12, 2).fill(PALETTE.metal);
+        pg.rect(x + 4, y + 5, 8, 4).fill(PALETTE.monitor);
+        pg.rect(x + 5, y + 6, 2, 1).fill(PALETTE.ok);
+        pg.rect(x + 6, y + 11, 4, 3).fill(0xf5f5f4);
         const steam = new Text({ text: "☕", style: new TextStyle({ fontSize: 8 }) });
         steam.position.set(x + 3, y - 10);
         this.propsLayer.addChild(steam);
       } else if (p.kind === "printer") {
+        shade(1, 14, 14, 4);
         pg.rect(x + 1, y + 4, TILE - 2, TILE - 6).fill(PALETTE.metal);
+        pg.rect(x + 1, y + 4, TILE - 2, 1).fill(0x6b7280);
         pg.rect(x + 3, y + 2, TILE - 6, 3).fill(PALETTE.metalDark);
+        // Paper in the output tray, slightly askew.
         pg.rect(x + 3, y + 9, TILE - 6, 4).fill(PALETTE.paper);
+        pg.rect(x + 4, y + 10, TILE - 9, 1).fill(0xb9bfc9);
       } else if (p.kind === "cabinet") {
+        shade(1, 14, 14, 4);
         pg.rect(x + 1, y + 3, TILE - 2, TILE - 4).fill(PALETTE.metalDark);
+        pg.rect(x + 1, y + 3, TILE - 2, 1).fill(PALETTE.metal);
+        // Two drawers, each with a handle.
         pg.rect(x + 2, y + 5, TILE - 4, 3).fill(PALETTE.metal);
+        pg.rect(x + 6, y + 6, 4, 1).fill(0x9ca3af);
         pg.rect(x + 2, y + 10, TILE - 4, 3).fill(PALETTE.metal);
+        pg.rect(x + 6, y + 11, 4, 1).fill(0x9ca3af);
       } else if (p.kind === "sofa") {
-        pg.rect(x, y + 4, TILE * 3, TILE - 2).fill(PALETTE.carpet);
-        pg.rect(x, y + 2, TILE * 3, 4).fill(PALETTE.roomStroke);
+        const w = TILE * 3;
+        shade(0, TILE + 1, w, 4);
+        pg.roundRect(x, y + 2, w, TILE, 3).fill(PALETTE.carpet);
+        // Back, then two cushions with a seam between them.
+        pg.roundRect(x, y + 2, w, 5, 2).fill(PALETTE.roomStroke);
+        pg.roundRect(x + 2, y + 7, w / 2 - 3, TILE - 7, 2).fill(PALETTE.cushion);
+        pg.roundRect(x + w / 2 + 1, y + 7, w / 2 - 3, TILE - 7, 2).fill(PALETTE.cushion);
+        // Arms.
+        pg.roundRect(x, y + 5, 3, TILE - 4, 1).fill(PALETTE.roomStroke);
+        pg.roundRect(x + w - 3, y + 5, 3, TILE - 4, 1).fill(PALETTE.roomStroke);
       } else if (p.kind === "table") {
-        pg.roundRect(x, y + 3, TILE * 4, TILE * 2 - 4, 3).fill(PALETTE.deskWood);
-        pg.roundRect(x + 2, y + 5, TILE * 4 - 4, TILE * 2 - 8, 2).fill(PALETTE.deskWoodDark);
+        const w = TILE * 4;
+        const h = TILE * 2 - 4;
+        // Chairs first, so the table top overlaps them and they read as tucked in.
+        for (let i = 0; i < 3; i++) {
+          const cxx = x + 4 + i * (TILE + 4);
+          pg.roundRect(cxx, y - 4, TILE - 6, 6, 2).fill(PALETTE.chair);
+          pg.roundRect(cxx, y + h + 1, TILE - 6, 6, 2).fill(PALETTE.chair);
+        }
+        shade(0, h + 2, w, 5, 0.4);
+        pg.roundRect(x, y + 3, w, h, 3).fill(PALETTE.deskWoodDark);
+        pg.roundRect(x + 1, y + 4, w - 2, h - 3, 3).fill(PALETTE.deskWood);
+        pg.roundRect(x + 1, y + 4, w - 2, 2, 2).fill(0x9d6b45);
       } else if (p.kind === "board") {
         pg.rect(x, y + 1, TILE * 14, TILE).fill(PALETTE.paper).stroke({ width: 1, color: 0x94a3b8 });
         this.propsLayer.addChild(pg);
@@ -417,7 +561,12 @@ export class OfficeRenderer {
   private drawMonitor(mon: Graphics, actor: ActorState | undefined) {
     const on = actor && actor.status !== "offline" && actor.status !== "idle" && !actor.roomId;
     const screen = on ? (actor?.actor.kind === "agent" ? PALETTE.monitorAgent : PALETTE.monitorOn) : 0x1f232b;
-    mon.clear().rect(2, -4, TILE - 4, 10).fill(PALETTE.monitor).rect(3, -3, TILE - 6, 7).fill(screen).rect(6, 6, 4, 2).fill(0x374151);
+    mon.clear();
+    // A lit screen throws light on the desk in front of it. One translucent wedge,
+    // and the desk stops looking like a plank with a sticker on it.
+    if (on) mon.rect(0, 5, TILE, 5).fill({ color: PALETTE.screenGlow, alpha: 0.12 });
+    mon.rect(3, 7, TILE - 6, 2).fill({ color: PALETTE.shadow, alpha: 0.4 });
+    mon.rect(2, -4, TILE - 4, 10).fill(PALETTE.monitor).rect(3, -3, TILE - 6, 7).fill(screen).rect(6, 6, 4, 2).fill(0x374151);
     if (on) mon.rect(4, -2, 5, 1).fill(0xffffff).rect(4, 0, 7, 1).fill(0xffffff).rect(4, 2, 3, 1).fill(0xffffff);
   }
 

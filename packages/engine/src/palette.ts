@@ -37,6 +37,21 @@ export const PALETTE = {
   wallEdge: 0x474e5e,
   doorFrame: 0x6b7280,
 
+  // A single shadow colour, always drawn with alpha. Nothing else does as much for
+  // "drawn by someone who meant it" as putting things on the floor rather than in it.
+  shadow: 0x05070b,
+
+  // Material detail. These are one or two shades off their base on purpose: a grout
+  // line that reads as a line rather than as a stripe is barely visible up close.
+  grout: 0x2e3440,
+  plank: 0x262a34,
+  carpetWeave: 0x443c4c,
+  skirting: 0x5a6274,
+  glass: 0x46606f,
+  windowPane: 0x5f7f92,
+  cushion: 0x4a4258,
+  screenGlow: 0x7fd3ff,
+
   carpet: 0x3b3340,
   metal: 0x4b5563,
   metalDark: 0x374151,
@@ -74,4 +89,20 @@ export function paletteFor(id: string) {
 
 export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
+}
+
+/**
+ * Lighten (`amount > 0`) or darken a packed RGB colour. Used for the lit and shaded
+ * faces of a shape, so a procedural sprite has more than one tone without needing a
+ * second colour picked by hand for every object.
+ */
+export function shade(color: number, amount: number): number {
+  const mix = (channel: number): number => {
+    const target = amount > 0 ? 255 : 0;
+    return Math.round(lerp(channel, target, Math.abs(amount)));
+  };
+  const r = mix((color >> 16) & 0xff);
+  const g = mix((color >> 8) & 0xff);
+  const b = mix(color & 0xff);
+  return (r << 16) | (g << 8) | b;
 }

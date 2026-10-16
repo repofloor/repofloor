@@ -1,6 +1,6 @@
 import { Container, Graphics, Text, TextStyle } from "pixi.js";
 import type { ActorState, ActivityStatus } from "@repofloor/protocol";
-import { PALETTE, paletteFor, lerp } from "./palette.js";
+import { PALETTE, paletteFor, lerp, shade } from "./palette.js";
 import { TILE } from "./layout.js";
 
 const LABEL_STYLE = new TextStyle({ fontFamily: "monospace", fontSize: 9, fill: PALETTE.text });
@@ -43,6 +43,7 @@ export class Avatar extends Container {
     this.nameLabel = new Text({ text: shortName(state), style: LABEL_STYLE });
     this.nameLabel.anchor.set(0.5, 0);
     this.nameLabel.y = 4;
+    this.nameLabel.resolution = 2;
     this.emoji.anchor.set(0.5, 1);
     this.emoji.y = -26;
     this.bubble.addChild(this.bubbleBg, this.bubbleText);
@@ -51,6 +52,17 @@ export class Avatar extends Container {
     this.eventMode = "static";
     this.cursor = "pointer";
     this.draw();
+  }
+
+  /**
+   * Stagger the name label onto a second line.
+   *
+   * Desks in a pod are three tiles apart and names are wider than that, so adjacent
+   * labels ran into each other and the floor read as one smear of text. Alternating
+   * rows costs nothing and fixes it without shrinking the type.
+   */
+  setLabelRow(row: number) {
+    this.nameLabel.y = 4 + (row % 2) * 9;
   }
 
   /** Tile position the avatar should walk to. */
@@ -173,6 +185,12 @@ export class Avatar extends Container {
   private draw() {
     const g = this.body.clear();
     const c = this.colors;
+
+    // Shadow first, so everything else lands on top of it. Without one an avatar
+    // hovers over the floor no matter how well the rest is drawn — and with a floor
+    // plan under it, hovering is exactly what it looked like.
+    g.ellipse(0, -1, 6, 2.5).fill({ color: PALETTE.shadow, alpha: 0.38 });
+
     if (this.isAgent) {
       // robot: legs, boxy body, head with antenna
       g.rect(-5, -4, 3, 4).fill(0x4b5563).rect(2, -4, 3, 4).fill(0x4b5563);
@@ -186,9 +204,15 @@ export class Avatar extends Container {
       // human: legs, body, arms, head, hair
       g.rect(-4, -4, 3, 4).fill(0x1f2937).rect(1, -4, 3, 4).fill(0x1f2937);
       g.rect(-5, -14, 10, 10).fill(c.shirt);
+      // A darker side and a lighter shoulder: the body stops being one flat block,
+      // which is most of why the old avatars read as paper cut-outs.
+      g.rect(2, -14, 3, 10).fill(shade(c.shirt, -0.18));
+      g.rect(-5, -14, 10, 2).fill(shade(c.shirt, 0.16));
       g.rect(-7, -13, 2, 7).fill(c.skin).rect(5, -13, 2, 7).fill(c.skin);
       g.rect(-4, -23, 8, 9).fill(c.skin);
+      g.rect(2, -23, 2, 9).fill(shade(c.skin, -0.14));
       g.rect(-5, -24, 10, 4).fill(c.hair).rect(-5, -21, 2, 3).fill(c.hair).rect(3, -21, 2, 3).fill(c.hair);
+      g.rect(-5, -24, 10, 1).fill(shade(c.hair, 0.22));
       this.face.clear().rect(-2, -19, 1, 1).fill(0x111).rect(1, -19, 1, 1).fill(0x111);
       this.ring.clear();
     }
