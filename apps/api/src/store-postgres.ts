@@ -9,7 +9,7 @@
  * dedup mechanism, so a webhook GitHub re-delivers after a restart still applies once.
  */
 
-import type { OfficeState } from "@repofloor/protocol";
+import type { OfficeEvent, OfficeState } from "@repofloor/protocol";
 import type { PoolLike, Queryable } from "./db.js";
 import type { OfficeStore } from "./store.js";
 
@@ -89,6 +89,41 @@ export class PostgresOfficeStore implements OfficeStore {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Insert, skipping anything already stored. The conflict target is the event id, so
+   * a backfill walking into commits a webhook already delivered is a no-op rather than
+   * a duplicate or an error.
+   *
+   * One statement over unnested arrays rather than a loop: a backfill arrives in
+   * batches of hundreds, and a round trip each would dominate the time.
+   */
+  async appendEvents(officeId: string, events: OfficeEvent[]): Promise<void> {
+    if (events.length === 0) return;
+    await this.#db.query(
+      `insert into office_events (event_id, office_id, at, body)
+            select * from unnest($1::text[], $2::text[], $3::timestamptz[], $4::jsonb[])
+       on conflict (event_id) do nothing`,
+      [
+        events.map((e) => e.id),
+        events.map(() => officeId),
+        events.map((e) => e.at),
+        events.map((e) => JSON.stringify(e)),
+      ],
+    );
+  }
+
+  /** Office-level by construction: there is no actor parameter to pass (ADR 0003). */
+  async eventsBetween(officeId: string, from: string, to: string, limit = 10_000): Promise<OfficeEvent[]> {
+    const { rows } = await this.#db.query<{ body: OfficeEvent }>(
+      `select body from office_events
+        where office_id = $1 and at >= $2 and at <= $3
+        order by at asc, event_id asc
+        limit $4`,
+      [officeId, from, to, limit],
+    );
+    return rows.map((r) => r.body);
   }
 
   async list(): Promise<string[]> {

@@ -93,7 +93,7 @@ time. Rule 6, and ADR 0003 decision 1.
 - [ ] **H1** Lite publishes the events it already collected, beside the snapshot it
       already publishes — a window, and any sub-range inside it
 - [ ] **H2** A player over those: scrub, play/pause, speed, feeding `applyEffect`
-- [ ] **H3** `apps/api` stores event bodies on ingest, in the transaction that saves the
+- [x] **H3** `apps/api` stores event bodies on ingest, in the transaction that saves the
       snapshot. A table beside `applied_events`, which stays a dedup ledger
 - [ ] **H4** Backfill as the App: unbounded, resumable historical collection
 - [ ] **H5** `GET /office/:owner/:repo/events?from=&to=` and the player over all of it
