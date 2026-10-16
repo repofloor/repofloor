@@ -82,6 +82,8 @@ test("publishing happens after the transaction, never inside it", async () => {
     save: (id, state) => store.save(id, state),
     markDelivered: (id) => store.markDelivered(id),
     list: () => store.list(),
+    appendEvents: (id, events) => store.appendEvents(id, events),
+    eventsBetween: (id, from, to) => store.eventsBetween(id, from, to),
     async transaction(key, fn) {
       open = true;
       try {
@@ -104,6 +106,8 @@ test("withOfficeTransaction runs inline against a store that offers none", async
     save: async () => {},
     markDelivered: async () => true,
     list: async () => [],
+    appendEvents: async () => {},
+    eventsBetween: async () => [],
   };
   assert.equal(await withOfficeTransaction(plain, OFFICE, async (s) => s === plain), true);
 });

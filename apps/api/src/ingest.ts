@@ -125,7 +125,13 @@ async function applyDelivery(
       applied.push(event);
     }
 
-    if (applied.length > 0) await store.save(office.id, state);
+    if (applied.length > 0) {
+      await store.save(office.id, state);
+      // The history and the snapshot it produced land together or not at all — they
+      // are the same fact written twice, and a snapshot its own events cannot
+      // reproduce would make every replay disagree with the live view (ADR 0003).
+      await store.appendEvents(office.id, applied);
+    }
     return { applied, state };
   });
 
