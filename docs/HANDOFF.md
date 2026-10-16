@@ -201,9 +201,10 @@ _Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realti
 
 ## Found by running it (2D-3 follow-up)
 
-- **The Dockerfiles did not know about `packages/collect`.** CI runs `pnpm build` over the workspace and
-  passes; the images carry their own list of what to copy and build, and nobody updated it. Image builds
-  are not covered by CI, so the only way this surfaces is building one. Fixed in both `apps/api` and
+- **The Dockerfiles did not know about `packages/collect`.** CI ran `pnpm build` over the workspace and
+  passed; the images carry their own list of what to copy and build, and nobody updated it. Image builds
+  were not covered by CI, so the only way this surfaced was building one — **now closed**: the `images`
+  job builds everything `docker-compose.yml` defines, on every PR. Fixed in both `apps/api` and
   `apps/realtime`, and `RESYNC_INTERVAL_MS` / `RESYNC_HOURS` added to the compose file, which also did not
   pass them through.
 - **A repository that 404s used to blank the office.** `collect`'s `get` turns a 404 into an empty list,

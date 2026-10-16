@@ -28,3 +28,31 @@ jobs:
         with:
           name: demo-site
           path: apps/demo/dist
+
+  # Separate and parallel rather than a step on build-test: it shares nothing with it
+  # (no Node, no pnpm install), and the failures it catches are the ones `pnpm build`
+  # cannot — so finding out about them at the same time rather than after is worth the
+  # extra runner.
+  #
+  # Why this exists: each Dockerfile carries its own list of which workspace packages to
+  # COPY and build, and the workspace build passes regardless of whether that list is
+  # right. Adding packages/collect broke every image while CI stayed green, and before
+  # that a missing .dockerignore copied the host's node_modules over the installed one —
+  # loudly on Windows, and silently with whatever was lying around on Linux. Both were
+  # found by hand. Neither can be again.
+  images:
+    runs-on: ubuntu-latest
+    env:
+      # docker-compose.yml marks WEBHOOK_SECRET as required, so interpolation fails
+      # without one even for a build. Nothing is run here; this value reaches no image.
+      WEBHOOK_SECRET: ci-interpolation-only
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - name: Build every image docker-compose.yml defines
+        # bake reads the compose file itself, so a service added there is covered
+        # without anyone remembering to add it here too.
+        run: |
+          docker buildx bake -f docker-compose.yml \
+            --set '*.cache-from=type=gha' \
+            --set '*.cache-to=type=gha,mode=max'
