@@ -17,15 +17,18 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/reducer/package.json packages/reducer/
+COPY packages/collect/package.json packages/collect/
 COPY apps/api/package.json apps/api/
 RUN pnpm install --frozen-lockfile --filter @repofloor/api...
 
 COPY packages/protocol packages/protocol
 COPY packages/reducer packages/reducer
+COPY packages/collect packages/collect
 COPY apps/api apps/api
 
 RUN pnpm --filter @repofloor/protocol run build \
  && pnpm --filter @repofloor/reducer run build \
+ && pnpm --filter @repofloor/collect run build \
  && pnpm --filter @repofloor/api run build
 
 ENV HOST=0.0.0.0

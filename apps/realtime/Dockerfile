@@ -18,18 +18,21 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/reducer/package.json packages/reducer/
+COPY packages/collect/package.json packages/collect/
 COPY apps/api/package.json apps/api/
 COPY apps/realtime/package.json apps/realtime/
 RUN pnpm install --frozen-lockfile --filter @repofloor/realtime...
 
 COPY packages/protocol packages/protocol
 COPY packages/reducer packages/reducer
+COPY packages/collect packages/collect
 COPY apps/api apps/api
 COPY apps/realtime apps/realtime
 
 # @repofloor/api is consumed through its built dist, so it is built here too.
 RUN pnpm --filter @repofloor/protocol run build \
  && pnpm --filter @repofloor/reducer run build \
+ && pnpm --filter @repofloor/collect run build \
  && pnpm --filter @repofloor/api run build \
  && pnpm --filter @repofloor/realtime run build
 

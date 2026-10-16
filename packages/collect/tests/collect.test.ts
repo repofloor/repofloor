@@ -46,3 +46,36 @@ test("collect builds a lite snapshot", async () => {
   assert.deepEqual(state.issues.map((i) => i.number), [9]);
   assert.equal(state.defaultBranchCi, "success");
 });
+
+test("a repository that is gone fails rather than collecting an empty office", async () => {
+  // `get` turns a 404 into an empty list, which is right for a sub-resource and wrong
+  // for the repository itself: Full mode's resync replaces what it has with what it
+  // collects, so a valid-but-empty snapshot silently blanks a real office. Found by
+  // running a sweep against real GitHub with a repository that only existed in a
+  // smoke test — it reported "resynced, actors: 0".
+  const fetchImpl = (async (url: string) =>
+    new Response(JSON.stringify({ message: "Not Found" }), { status: 404 })) as unknown as typeof fetch;
+
+  await assert.rejects(
+    () => collect({ owner: "repofloor", repo: "never-existed", token: "t", fetchImpl, now: NOW }),
+    /404/,
+  );
+});
+
+test("a sub-resource that 404s is still tolerated", async () => {
+  // An empty repository answers 409 for commits and 404 for some lists. That must not
+  // fail the collection — it is a real, empty office.
+  const fetchImpl = (async (url: string) => {
+    if (String(url).endsWith("/repos/repofloor/repofloor")) {
+      return new Response(
+        JSON.stringify({ default_branch: "main", private: false, owner: { login: "repofloor", type: "Organization" } }),
+        { status: 200 },
+      );
+    }
+    return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
+  }) as unknown as typeof fetch;
+
+  const state = await collect({ owner: "repofloor", repo: "repofloor", token: "t", fetchImpl, now: NOW });
+  assert.equal(state.office.id, "repofloor/repofloor");
+  assert.deepEqual(state.actors, []);
+});

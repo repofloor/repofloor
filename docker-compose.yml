@@ -56,6 +56,10 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      # Periodic resync rebuilds every office from the REST API as the App, closing
+      # whatever the webhook stream missed. Needs the App identity above; 0 disables.
+      RESYNC_INTERVAL_MS: ${RESYNC_INTERVAL_MS:-}
+      RESYNC_HOURS: ${RESYNC_HOURS:-}
     ports:
       - "${API_PORT:-8787}:8787"
     depends_on:

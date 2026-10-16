@@ -307,7 +307,10 @@ async function collect(opts) {
     return r.json();
   };
   const full = `${opts.owner}/${opts.repo}`;
-  const repo = o(await get(`/repos/${full}`));
+  const repoResponse = await f(`${api}/repos/${full}`, { headers });
+  if (!repoResponse.ok)
+    throw new Error(`GitHub API ${repoResponse.status} for /repos/${full}`);
+  const repo = o(await repoResponse.json());
   const ownerObj = o(repo["owner"]);
   const defaultBranch = s(repo["default_branch"], "main");
   const state = emptyOfficeState({

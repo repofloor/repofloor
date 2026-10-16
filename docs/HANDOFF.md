@@ -199,6 +199,22 @@ _Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realti
   the App identity and Postgres, and the log says which one is missing when it does not.
 - 142 tests in `apps/api`, ten of them for this.
 
+## Found by running it (2D-3 follow-up)
+
+- **The Dockerfiles did not know about `packages/collect`.** CI runs `pnpm build` over the workspace and
+  passes; the images carry their own list of what to copy and build, and nobody updated it. Image builds
+  are not covered by CI, so the only way this surfaces is building one. Fixed in both `apps/api` and
+  `apps/realtime`, and `RESYNC_INTERVAL_MS` / `RESYNC_HOURS` added to the compose file, which also did not
+  pass them through.
+- **A repository that 404s used to blank the office.** `collect`'s `get` turns a 404 into an empty list,
+  which is right for a sub-resource — no commits yet, a 409 on an empty repo — and wrong for the repository
+  itself: resync replaces what it has with what it collects, so a renamed, deleted or no-longer-visible
+  repository produced a valid, empty snapshot and overwrote a real office with it. The first real sweep
+  reported `office resynced, actors: 0` for a repository that has never existed. The repository fetch is
+  strict now, so it fails, the sweep carries on, and the old snapshot is left alone.
+- Verified against real GitHub: a sweep minted an installation token from the App's private key and rebuilt
+  `repofloor/repofloor` with its actual contributors and 15 issues.
+
 ## Noted, not scheduled
 
 - **Visual target** ([`docs/VISUAL_TARGET.md`](VISUAL_TARGET.md), 2026-10-15): a pixel-art reference from the
