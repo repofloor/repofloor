@@ -13,7 +13,8 @@
   "dependencies": {
     "@repofloor/engine": "workspace:*",
     "@repofloor/protocol": "workspace:*",
-    "@repofloor/reducer": "workspace:*"
+    "@repofloor/reducer": "workspace:*",
+    "@repofloor/replay": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

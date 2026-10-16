@@ -22,6 +22,7 @@ import { REALTIME_URL } from "../config.js";
 import { ago, clockText, el } from "../dom.js";
 import { describeEvent, stripRows, summarize, type LogLine, type StripRow } from "../describe.js";
 import { OfficeLive, type LiveStatus } from "../live.js";
+import { createReplay, type ReplayControl } from "../replay.js";
 import { routePath } from "../route.js";
 import type { View, ViewContext } from "./buildings.js";
 import { failure, onRetry, skeleton } from "./states.js";
@@ -38,6 +39,9 @@ export function renderOffice(ctx: ViewContext, owner: string, repo: string): Vie
   let disposed = false;
   let renderer: OfficeRenderer | null = null;
   let live: OfficeLive | null = null;
+  let replay: ReplayControl | null = null;
+  /** While a replay is on screen the live path keeps its state and renders nothing. */
+  let replaying = false;
   let decayTimer: ReturnType<typeof setInterval> | null = null;
   let clockTimer: ReturnType<typeof setInterval> | null = null;
   let state: OfficeState | null = null;
@@ -46,6 +50,8 @@ export function renderOffice(ctx: ViewContext, owner: string, repo: string): Vie
     disposed = true;
     live?.stop();
     live = null;
+    replay?.stop();
+    replay = null;
     if (decayTimer !== null) clearInterval(decayTimer);
     if (clockTimer !== null) clearInterval(clockTimer);
     document.removeEventListener("visibilitychange", onVisible);
@@ -92,6 +98,31 @@ export function renderOffice(ctx: ViewContext, owner: string, repo: string): Vie
         frame.clock.textContent = clockText();
 
         startLive();
+
+        // The replay control goes beside the live indicator: it is the same question
+        // — what is this office doing — asked about a different moment.
+        replay = createReplay({
+          officeId,
+          api: ctx.api,
+          base: initial,
+          handlers: {
+            onFrame: (at, animate) => {
+              renderer?.setState(at);
+              for (const event of animate) renderer?.applyEffect(event);
+              frame.strip.replaceChildren(stripList(stripRows(at)));
+              frame.count.textContent = summarize(at);
+            },
+            onActive: (active) => {
+              replaying = active;
+              // Leaving the past means catching up with the present in one step.
+              if (!active && state) push(state);
+            },
+            onStatus: (text) => {
+              frame.snapshot.textContent = text;
+            },
+          },
+        });
+        frame.live.after(replay.root);
         document.addEventListener("visibilitychange", onVisible);
       },
       (err: unknown) => {
@@ -111,6 +142,7 @@ export function renderOffice(ctx: ViewContext, owner: string, repo: string): Vie
   /** One place where state becomes pixels and text, so the three can never disagree. */
   function push(next: OfficeState): void {
     state = next;
+    if (replaying) return; // the viewer is looking at the past; do not drag them back
     renderer?.setState(next);
     frame.strip.replaceChildren(stripList(stripRows(next)));
     frame.snapshot.textContent = `snapshot ${ago(next.generatedAt)}`;
@@ -131,8 +163,10 @@ export function renderOffice(ctx: ViewContext, owner: string, repo: string): Vie
         onEvents: (events) => {
           for (const event of events) {
             if (state) state = reduce(state, event);
-            renderer?.applyEffect(event);
-            appendLog(describeEvent(event, state ?? undefined));
+            if (!replaying) {
+              renderer?.applyEffect(event);
+              appendLog(describeEvent(event, state ?? undefined));
+            }
           }
           if (state) push(state);
         },
