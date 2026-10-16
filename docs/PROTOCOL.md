@@ -20,6 +20,12 @@ Source of truth: [`packages/protocol/src/index.ts`](../packages/protocol/src/ind
 Priority (higher wins while the current status is fresh):
 `offline < idle < in_room < discussing < reviewing < coding < building < blocked < focus < celebrating`.
 
+### How priority is applied
+
+For activity updates handled by the reducer's priority check, a fresh status is replaced only when the incoming status has an equal or higher rank. For example, a fresh `reviewing` status can become `coding`, but a fresh `blocked` status stays `blocked` when a lower-ranked `coding` update arrives. That lower-ranked event still advances `lastSeen`.
+
+Freshness is measured from the incoming event timestamp to `lastSeen`: when the gap is greater than 20 minutes, the new activity replaces the old status regardless of rank. Thus, a `coding` update can replace an old `blocked` status after that stale interval. A current `celebrating` status is also replaced by the next priority-checked activity update, even if that update ranks lower. Room and focus moves have their own reducer rules; this table does not override those transitions.
+
 ## Event ids
 
 Must be unique and stable per upstream fact so redelivery is idempotent:
