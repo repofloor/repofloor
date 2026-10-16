@@ -235,7 +235,9 @@ _Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realti
 - Avatars walk in straight lines through desks (A* on the tile grid — issue #5).
 - `applyEffect` is called by the demo; Lite page never calls it (no live events) — fine for now.
 - No engine unit tests (visual package). A Playwright screenshot workflow is issue #16.
-- Lite `collect.ts` does not page beyond 100 commits / 50 PRs / 50 issues / 20 runs.
+- ~~Lite `collect.ts` does not page beyond 100 commits / 50 PRs / 50 issues / 20 runs.~~ Paginated now, with
+  `MAX_PAGES` as a guard rather than a view. Contributors stay capped at 30 and workflow runs at 20 on
+  purpose: a floor cannot draw two hundred people, and only the latest CI status is read.
 - `apps/realtime`: the resync after a reconnect reloads every live office at once. Fine at this scale, a
   thundering herd at a thousand.
 - `apps/api`: sessions live in memory, so a restart signs everyone out and more than one instance needs
