@@ -282,6 +282,7 @@ function replay(initial, events, nowIso) {
 }
 
 // ../../packages/collect/dist/index.js
+var MAX_PAGES = 10;
 var o = (v) => typeof v === "object" && v !== null ? v : {};
 var s = (v, d = "") => typeof v === "string" ? v : d;
 var n = (v, d = 0) => typeof v === "number" ? v : d;
@@ -305,6 +306,19 @@ async function collect(opts) {
     if (!r.ok)
       throw new Error(`GitHub API ${r.status} for ${path}`);
     return r.json();
+  };
+  const getPages = async (path, perPage, stop, maxPages = MAX_PAGES) => {
+    const all = [];
+    for (let page = 1; page <= maxPages; page++) {
+      const join2 = path.includes("?") ? "&" : "?";
+      const items = arr(await get(`${path}${join2}per_page=${perPage}&page=${page}`));
+      all.push(...items);
+      if (items.length < perPage)
+        break;
+      if (stop?.(items))
+        break;
+    }
+    return all;
   };
   const full = `${opts.owner}/${opts.repo}`;
   const repoResponse = await f(`${api}/repos/${full}`, { headers });
@@ -347,14 +361,21 @@ async function collect(opts) {
   };
   for (const c of arr(await get(`/repos/${full}/contributors?per_page=30`)))
     seen(c);
-  for (const c of arr(await get(`/repos/${full}/commits?since=${since.toISOString()}&per_page=100`))) {
+  for (const c of await getPages(`/repos/${full}/commits?since=${since.toISOString()}`, 100)) {
     const co = o(c);
     const author = seen(co["author"]);
     const at = s(o(o(co["commit"])["author"])["date"], now.toISOString());
     if (author)
       ev(`c:${s(co["sha"])}`, at, { type: "push", actorId: author, branch: defaultBranch, commits: 1, url: s(co["html_url"]) });
   }
-  for (const p of arr(await get(`/repos/${full}/pulls?state=all&sort=updated&direction=desc&per_page=50`))) {
+  const openPulls = await getPages(`/repos/${full}/pulls?state=open&sort=updated&direction=desc`, 50);
+  const closedPulls = await getPages(
+    `/repos/${full}/pulls?state=closed&sort=updated&direction=desc`,
+    50,
+    // Sorted newest-first, so once a whole page predates the window, so does the rest.
+    (page) => page.every((p) => Date.parse(s(o(p)["updated_at"])) < since.getTime())
+  );
+  for (const p of [...openPulls, ...closedPulls]) {
     const po = o(p);
     const updated = s(po["updated_at"]);
     if (Date.parse(updated) < since.getTime() && s(po["state"]) !== "open")
@@ -380,7 +401,7 @@ async function collect(opts) {
         ev(`pr:${pr.number}:push`, updated, { type: "push", actorId: author, branch, commits: 0, url: pr.url });
     }
   }
-  for (const i of arr(await get(`/repos/${full}/issues?state=all&sort=updated&direction=desc&since=${since.toISOString()}&per_page=50`))) {
+  for (const i of await getPages(`/repos/${full}/issues?state=all&sort=updated&direction=desc&since=${since.toISOString()}`, 50)) {
     const io = o(i);
     if (io["pull_request"])
       continue;

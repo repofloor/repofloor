@@ -16,6 +16,13 @@
 import { emptyOfficeState, type OfficeEvent, type OfficeState, type Actor } from "@repofloor/protocol";
 import { replay } from "@repofloor/reducer";
 
+/**
+ * How many pages any one list will follow. A guard against an unbounded fetch on a
+ * repository with years of history, not a view on how much is interesting: at this
+ * depth the office already has far more than it can draw.
+ */
+export const MAX_PAGES = 10;
+
 export interface CollectOptions {
   owner: string;
   repo: string;
@@ -57,6 +64,35 @@ export async function collect(opts: CollectOptions): Promise<OfficeState> {
     if (r.status === 404 || r.status === 409) return [];
     if (!r.ok) throw new Error(`GitHub API ${r.status} for ${path}`);
     return r.json();
+  };
+
+  /**
+   * Follow pages until one comes back short, or until `stop` says the rest cannot
+   * matter, or until `maxPages`.
+   *
+   * Without this a busy repository is silently truncated: the first page of commits is
+   * 100, and a repository that pushed more than that inside the look-back window simply
+   * lost the rest — with no error, and a floor that looked merely quiet.
+   *
+   * `maxPages` is a stop against an unbounded fetch, not a product decision. Past it
+   * the office has far more than it can draw anyway.
+   */
+  const getPages = async (
+    path: string,
+    perPage: number,
+    stop?: (page: unknown[]) => boolean,
+    maxPages = MAX_PAGES,
+  ): Promise<unknown[]> => {
+    const all: unknown[] = [];
+    for (let page = 1; page <= maxPages; page++) {
+      const join = path.includes("?") ? "&" : "?";
+      const items = arr(await get(`${path}${join}per_page=${perPage}&page=${page}`));
+      all.push(...items);
+      // A short page is the last page; GitHub does not say so any other way here.
+      if (items.length < perPage) break;
+      if (stop?.(items)) break;
+    }
+    return all;
   };
 
   const full = `${opts.owner}/${opts.repo}`;
@@ -114,15 +150,33 @@ export async function collect(opts: CollectOptions): Promise<OfficeState> {
   for (const c of arr(await get(`/repos/${full}/contributors?per_page=30`))) seen(c);
 
   // Commits on default branch
-  for (const c of arr(await get(`/repos/${full}/commits?since=${since.toISOString()}&per_page=100`))) {
+  // `since` bounds this server-side, so pagination ends on its own; MAX_PAGES is only
+  // the guard. A repository pushing more than a hundred commits in the window used to
+  // lose everything past the first page.
+  for (const c of await getPages(`/repos/${full}/commits?since=${since.toISOString()}`, 100)) {
     const co = o(c);
     const author = seen(co["author"]);
     const at = s(o(o(co["commit"])["author"])["date"], now.toISOString());
     if (author) ev(`c:${s(co["sha"])}`, at, { type: "push", actorId: author, branch: defaultBranch, commits: 1, url: s(co["html_url"]) });
   }
 
-  // Open PRs + recently updated
-  for (const p of arr(await get(`/repos/${full}/pulls?state=all&sort=updated&direction=desc&per_page=50`))) {
+  // Open PRs, and closed ones touched inside the window.
+  //
+  // Two queries rather than one `state=all`, because the two have different stopping
+  // rules and one query cannot honour both. An open PR belongs on the floor however
+  // old it is — someone is still waiting on it — while a closed one only matters if
+  // something happened to it recently. Asking for `state=all` sorted by `updated` and
+  // taking the first page meant an open PR nobody had touched in a while fell off the
+  // end, on exactly the repositories busy enough for that to matter.
+  const openPulls = await getPages(`/repos/${full}/pulls?state=open&sort=updated&direction=desc`, 50);
+  const closedPulls = await getPages(
+    `/repos/${full}/pulls?state=closed&sort=updated&direction=desc`,
+    50,
+    // Sorted newest-first, so once a whole page predates the window, so does the rest.
+    (page) => page.every((p) => Date.parse(s(o(p)["updated_at"])) < since.getTime()),
+  );
+
+  for (const p of [...openPulls, ...closedPulls]) {
     const po = o(p);
     const updated = s(po["updated_at"]);
     if (Date.parse(updated) < since.getTime() && s(po["state"]) !== "open") continue;
@@ -148,7 +202,8 @@ export async function collect(opts: CollectOptions): Promise<OfficeState> {
   }
 
   // Issues (not PRs) updated recently
-  for (const i of arr(await get(`/repos/${full}/issues?state=all&sort=updated&direction=desc&since=${since.toISOString()}&per_page=50`))) {
+  // Issues take `since` as a parameter too, so the same applies.
+  for (const i of await getPages(`/repos/${full}/issues?state=all&sort=updated&direction=desc&since=${since.toISOString()}`, 50)) {
     const io = o(i);
     if (io["pull_request"]) continue;
     const author = seen(io["user"]);
