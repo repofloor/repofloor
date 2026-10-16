@@ -22,25 +22,24 @@ RUN corepack enable
 
 WORKDIR /app
 
+# The whole of packages/, not an enumeration.
+#
+# Three times a new workspace package broke every image while the workspace build
+# stayed green, because each Dockerfile carried its own list of what to copy and in
+# what order to build it. `pnpm --filter <app>...` already knows both; .dockerignore
+# keeps node_modules and dist out of the copy.
+#
 # Manifests first: the install layer is then cached until a dependency changes.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
-COPY packages/protocol/package.json packages/protocol/
-COPY packages/reducer/package.json packages/reducer/
-COPY packages/engine/package.json packages/engine/
+COPY packages packages
 COPY apps/web/package.json apps/web/
 RUN pnpm install --frozen-lockfile --filter @repofloor/web...
 
-COPY packages/protocol packages/protocol
-COPY packages/reducer packages/reducer
-COPY packages/engine packages/engine
 COPY apps/web apps/web
 
 # VITE_API_BASE and VITE_REALTIME_URL are deliberately left unset: same origin is the
 # deployment this image is built for, and both escapes are for other arrangements.
-RUN pnpm --filter @repofloor/protocol run build \
- && pnpm --filter @repofloor/reducer run build \
- && pnpm --filter @repofloor/engine run build \
- && pnpm --filter @repofloor/web run build
+RUN pnpm --filter @repofloor/web... run build
 
 FROM caddy:2.10-alpine
 

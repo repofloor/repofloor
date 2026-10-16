@@ -17,6 +17,18 @@ export function officeApiPath(officeId: string): string {
 }
 
 /**
+ * The office's history. Office-level by construction: there is no actor parameter to
+ * build, because replay does not have one (ADR 0003, rule 6).
+ */
+export function officeEventsPath(officeId: string, span?: { from?: string; to?: string }): string {
+  const query = new URLSearchParams();
+  if (span?.from) query.set("from", span.from);
+  if (span?.to) query.set("to", span.to);
+  const q = query.toString();
+  return `${officeApiPath(officeId)}/events${q ? `?${q}` : ""}`;
+}
+
+/**
  * The socket URL for an office.
  *
  * With no configured base the page's own origin is used, with the scheme swapped:

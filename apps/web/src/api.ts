@@ -11,8 +11,8 @@
  * second ACL to consult and no "you need access" to render, because we do not know that.
  */
 
-import { assertOfficeState, type OfficeState } from "@repofloor/protocol";
-import { normalizeBase, officeApiPath } from "./endpoints.js";
+import { assertOfficeState, type OfficeEvent, type OfficeState } from "@repofloor/protocol";
+import { normalizeBase, officeApiPath, officeEventsPath } from "./endpoints.js";
 
 export type FailureKind =
   /** Not signed in (or signed out), and the thing asked for is not public. */
@@ -74,6 +74,13 @@ export interface OfficeListing {
   partial: boolean;
 }
 
+export interface OfficeHistory {
+  officeId: string;
+  events: OfficeEvent[];
+  /** The span held more than one request returns; narrow it to see the rest. */
+  truncated: boolean;
+}
+
 export interface ApiClientOptions {
   /** Empty means this page's own origin, which is the deployment we document. */
   base?: string;
@@ -104,6 +111,16 @@ export class ApiClient {
     const listing = await this.#get<OfficeListing>("/offices");
     if (!Array.isArray(listing.offices)) throw new ApiError("bad_response");
     return { offices: listing.offices, partial: listing.partial === true };
+  }
+
+  /**
+   * The events behind an office, for replay. Behind the same authorization as the
+   * snapshot — the server decides that, this only asks.
+   */
+  async officeEvents(officeId: string, span?: { from?: string; to?: string }): Promise<OfficeHistory> {
+    const body = await this.#get<OfficeHistory>(officeEventsPath(officeId, span));
+    if (!Array.isArray(body.events)) throw new ApiError("bad_response");
+    return { officeId, events: body.events, truncated: body.truncated === true };
   }
 
   async office(officeId: string): Promise<OfficeState> {

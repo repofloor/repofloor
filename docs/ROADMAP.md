@@ -80,7 +80,7 @@ none of it is scheduled, and Phase 2 stays ahead of it.
       The reasoning is in [VISUAL_TARGET](VISUAL_TARGET.md); the resolver is parked on a
       branch. The default stays procedural, which is what rule 5 always required.
 
-## Phase 2.5 — History and replay
+## Phase 2.5 — History and replay ✅
 
 A repository's whole life, watchable. [ADR 0003](adr/0003-history-and-replay.md) has the
 reasoning, including why the order below is backwards from the ambition: the player is
@@ -96,7 +96,7 @@ time. Rule 6, and ADR 0003 decision 1.
 - [x] **H3** `apps/api` stores event bodies on ingest, in the transaction that saves the
       snapshot. A table beside `applied_events`, which stays a dedup ledger
 - [x] **H4** Backfill as the App: unbounded, resumable historical collection
-- [ ] **H5** `GET /office/:owner/:repo/events?from=&to=` and the player over all of it
+- [x] **H5** `GET /office/:owner/:repo/events?from=&to=` and the player over all of it
 
 ## Phase 3 — Agents
 - [ ] Agent tokens; `POST /agent/events`

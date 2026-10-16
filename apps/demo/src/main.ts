@@ -8,7 +8,7 @@ import {
   stamp,
   stateAt,
   type PublishedHistory,
-} from "./history.js";
+} from "@repofloor/replay";
 import { assertOfficeState, type OfficeEvent, type OfficeState } from "@repofloor/protocol";
 import { initialState, seedEvents, nextEvent } from "./simulator.js";
 

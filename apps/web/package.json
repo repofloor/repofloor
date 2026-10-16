@@ -15,7 +15,8 @@
   "dependencies": {
     "@repofloor/engine": "workspace:*",
     "@repofloor/protocol": "workspace:*",
-    "@repofloor/reducer": "workspace:*"
+    "@repofloor/reducer": "workspace:*",
+    "@repofloor/replay": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

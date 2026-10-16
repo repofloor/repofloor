@@ -35,6 +35,12 @@ import { InMemoryOfficeStore, type OfficeStore } from "./store.js";
 import { SIGNATURE_HEADER, verifyWebhookSignature } from "./signature.js";
 
 export { MAX_BODY_BYTES };
+/** Events one history request will return. Past this the caller asks for a narrower span. */
+export const MAX_EVENTS = 20_000;
+/** The default `from`: before any repository existed, so "everything" needs no argument. */
+const EPOCH = "1970-01-01T00:00:00.000Z";
+
+type DeniedReason = Exclude<OfficeReadResult, { ok: true }>["reason"];
 
 export interface AppOptions {
   /** The GitHub App webhook secret. Required: without it no delivery can be trusted. */
@@ -115,6 +121,17 @@ export function createApp(options: AppOptions): App {
     if (path === "/offices") {
       if (req.method !== "GET") return json(res, 405, { error: "method_not_allowed" });
       return json(res, 200, await listReadableOffices(readDeps, req));
+    }
+
+    const events = path.match(/^\/office\/([^/]+)\/([^/]+)\/events$/);
+    if (events) {
+      if (req.method !== "GET") return json(res, 405, { error: "method_not_allowed" });
+      return handleOfficeEvents(
+        req,
+        res,
+        url,
+        `${decodeURIComponent(events[1]!)}/${decodeURIComponent(events[2]!)}`,
+      );
     }
 
     const office = path.match(/^\/office\/([^/]+)\/([^/]+)$/);
@@ -245,11 +262,63 @@ export function createApp(options: AppOptions): App {
    * `forbidden` and `unknown_office` deliberately answer alike: whether a private
    * repository exists is itself private, and that is how GitHub's own API answers.
    */
+  /**
+   * The office's history: events in a span, in the order they happened (ADR 0003).
+   *
+   * Behind the *same* authorization as the snapshot, and that is not a formality. A
+   * private repository's history is at least as revealing as its current state, and a
+   * read path that forgot to ask would be a hole that looks like a feature.
+   *
+   * There is no actor parameter and there must not be one. Replay is office-level
+   * (ADR 0003 decision 1, rule 6): filtering a year by person is precisely the
+   * artifact the rule exists to prevent, and the cheapest place to prevent it is by
+   * never offering it.
+   */
+  async function handleOfficeEvents(
+    req: IncomingMessage,
+    res: ServerResponse,
+    url: URL,
+    officeId: string,
+  ): Promise<void> {
+    const decision = await authorizeOfficeRead(readDeps, officeId, req);
+    if (!decision.ok) return denyOfficeRead(res, officeId, decision.reason);
+
+    const from = url.searchParams.get("from") ?? EPOCH;
+    const to = url.searchParams.get("to") ?? now();
+    if (Number.isNaN(Date.parse(from)) || Number.isNaN(Date.parse(to))) {
+      return json(res, 400, { error: "bad_span", detail: "from and to must be ISO timestamps" });
+    }
+
+    const asked = Number(url.searchParams.get("limit") ?? MAX_EVENTS);
+    const limit = Number.isFinite(asked) && asked > 0 ? Math.min(asked, MAX_EVENTS) : MAX_EVENTS;
+
+    // One over the limit, so "there is more" is a fact rather than a guess: a caller
+    // that got exactly `limit` cannot otherwise tell a full page from the last one.
+    const found = await store.eventsBetween(officeId, from, to, limit + 1);
+    const truncated = found.length > limit;
+
+    return json(res, 200, {
+      officeId,
+      from,
+      to,
+      truncated,
+      events: truncated ? found.slice(0, limit) : found,
+    });
+  }
+
   async function handleOffice(req: IncomingMessage, res: ServerResponse, officeId: string): Promise<void> {
     const result = await authorizeOfficeRead(readDeps, officeId, req);
     if (result.ok) return json(res, 200, decay(result.state, now()));
+    return denyOfficeRead(res, officeId, result.reason);
+  }
 
-    switch (result.reason) {
+  /**
+   * One refusal, shared by the snapshot and the history, so the two can never drift
+   * into answering the same refusal differently — which is how a reader would learn
+   * that a private repository exists.
+   */
+  function denyOfficeRead(res: ServerResponse, officeId: string, reason: DeniedReason): void {
+    switch (reason) {
       case "authentication_required":
         res.setHeader("www-authenticate", 'Bearer realm="repofloor", error="invalid_request"');
         return json(res, 401, {

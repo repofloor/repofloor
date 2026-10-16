@@ -708,3 +708,29 @@ main:focus {
 .floor__body--alone {
   grid-template-columns: minmax(0, 1fr);
 }
+
+/* ── replay ──────────────────────────────────────────────────────────────────
+   The control sits beside the live indicator: the same question about a
+   different moment. Collapsed to one button until someone asks for it, because
+   most visits are about now. */
+.replay { display: inline-flex; align-items: center; gap: 8px; }
+.replay button {
+  background: var(--chip, #1c2029); color: inherit; border: 1px solid #343a48;
+  border-radius: 4px; padding: 2px 8px; font: inherit; font-size: 11px; cursor: pointer;
+}
+.replay button:hover { background: #262b37; }
+.replay button:disabled { opacity: 0.6; cursor: default; }
+.replay__panel {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px; border: 1px solid #262a35; border-radius: 6px;
+  background: #14171d; min-width: 280px;
+}
+.replay__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.replay__at { font-size: 11px; color: var(--dim, #9aa3b5); font-variant-numeric: tabular-nums; }
+.replay__scrub { width: 100%; }
+.replay__buttons, .replay__presets, .replay__speeds {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+}
+.replay__speeds { font-size: 11px; color: var(--dim, #9aa3b5); }
+.replay__note { margin: 2px 0 0; font-size: 11px; color: var(--dim, #9aa3b5); }
+@media (max-width: 640px) { .replay__panel { min-width: 0; } }
