@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">
-  <img src="docs/assets/icon.svg" alt="" width="28" height="28" align="absmiddle" />
+  <img src="docs/assets/icon-64.png" alt="" width="28" height="28" align="absmiddle" />
   Repofloor
 </h1>
 
