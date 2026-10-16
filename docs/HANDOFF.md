@@ -231,15 +231,17 @@ _Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realti
   view that one label reads as two overlapping ones, and PR #31 describes it as an avatar-placement bug.
   It is not — there is no placement bug; it is one wide label.
 
-- Speech bubbles overlap when several actors in the top desk row talk at once (needs simple collision/stagger).
+- ~~Speech bubbles overlap when several actors in the top desk row talk at once.~~ Staggered across three
+  lanes, keyed on the desk column, with a stem so a lifted balloon still points at its owner.
 - Avatars walk in straight lines through desks (A* on the tile grid — issue #5).
 - `applyEffect` is called by the demo; Lite page never calls it (no live events) — fine for now.
 - No engine unit tests (visual package). A Playwright screenshot workflow is issue #16.
 - ~~Lite `collect.ts` does not page beyond 100 commits / 50 PRs / 50 issues / 20 runs.~~ Paginated now, with
   `MAX_PAGES` as a guard rather than a view. Contributors stay capped at 30 and workflow runs at 20 on
   purpose: a floor cannot draw two hundred people, and only the latest CI status is read.
-- `apps/realtime`: the resync after a reconnect reloads every live office at once. Fine at this scale, a
-  thundering herd at a thousand.
+- ~~`apps/realtime`: the resync after a reconnect reloads every live office at once.~~ Capped at four at a
+  time (`RESYNC_CONCURRENCY`). It runs exactly when the database has just come back, which is the worst
+  possible moment for a burst.
 - `apps/api`: sessions live in memory, so a restart signs everyone out and more than one instance needs
   sticky sessions. Deliberate — it keeps every credential out of the database — but it is the first thing to
   revisit when the service is run in more than one place.

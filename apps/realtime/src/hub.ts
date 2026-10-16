@@ -20,6 +20,12 @@ import { silentLogger } from "@repofloor/api";
 import { isEmptyChange, OfficePresence, presenceEvents, type PresenceOptions } from "./presence.js";
 import { CLOSE, encode, type ServerMessage, type Viewer } from "./wire.js";
 
+/**
+ * How many offices a post-reconnect sweep rebuilds at once. Small on purpose: see
+ * `resyncAll`. Four is enough to not crawl and few enough to not be a burst.
+ */
+export const RESYNC_CONCURRENCY = 4;
+
 /** Everything the hub needs of a connection. `ws` satisfies it; so does a test fake. */
 export interface Client {
   send(data: string): void;
@@ -180,7 +186,20 @@ export class OfficeHub {
 
   /** Resync every live channel. What a reconnected listener owes its clients. */
   async resyncAll(): Promise<void> {
-    await Promise.all([...this.#channels.keys()].map((officeId) => this.resync(officeId)));
+    // A few at a time, not all at once.
+    //
+    // This runs the moment the listener reconnects — which is the moment the database
+    // has just come back, or the network has, and is least able to absorb a spike. The
+    // old `Promise.all` turned "we lost the connection" into one burst of a snapshot
+    // query per office plus a send to every socket on each, at exactly the wrong
+    // instant. Spreading it costs a second nobody is watching for.
+    const queue = [...this.#channels.keys()];
+    const workers = Array.from({ length: Math.min(RESYNC_CONCURRENCY, queue.length) }, async () => {
+      for (let officeId = queue.pop(); officeId !== undefined; officeId = queue.pop()) {
+        await this.resync(officeId);
+      }
+    });
+    await Promise.all(workers);
   }
 
   /** Close every connection, politely. Used on shutdown. */

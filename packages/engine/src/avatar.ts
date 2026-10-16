@@ -32,6 +32,8 @@ export class Avatar extends Container {
   private jump = 0;
   state: ActorState;
   private trailIdx = 0;
+  /** How far this avatar's speech bubble sits above the default, to miss its neighbours. */
+  private bubbleLift = 0;
   private trailTimer = 0;
 
   constructor(state: ActorState) {
@@ -63,6 +65,11 @@ export class Avatar extends Container {
    */
   setLabelRow(row: number) {
     this.nameLabel.y = 4 + (row % 2) * 9;
+    // Three rows rather than two: a pod is three desks wide, so two would still put
+    // the first and third on the same line. Bubbles are taller than labels, so they
+    // need the extra lane more.
+    this.bubbleLift = (row % 3) * 15;
+    this.drawBubble();
   }
 
   /** Tile position the avatar should walk to. */
@@ -178,8 +185,23 @@ export class Avatar extends Container {
   private drawBubble() {
     const w = this.bubbleText.width + 8;
     const h = this.bubbleText.height + 4;
-    this.bubbleBg.clear().roundRect(-w / 2, -44 - h, w, h, 2).fill(0xffffff).moveTo(-3, -44).lineTo(3, -44).lineTo(0, -40).fill(0xffffff);
-    this.bubbleText.position.set(-w / 2 + 4, -44 - h + 2);
+    // The tail stays on the head; only the balloon rises. Neighbours talking at once
+    // used to stack their bubbles on exactly the same line and become unreadable, and
+    // the people most likely to talk at once are the ones sitting together.
+    const base = -44 - this.bubbleLift;
+    this.bubbleBg
+      .clear()
+      .roundRect(-w / 2, base - h, w, h, 2)
+      .fill(0xffffff)
+      .moveTo(-3, base)
+      .lineTo(3, base)
+      .lineTo(0, -40)
+      .fill(0xffffff);
+    if (this.bubbleLift > 0) {
+      // A thin stem down to the head, so a lifted balloon still points at its owner.
+      this.bubbleBg.rect(-1, base, 2, this.bubbleLift).fill(0xffffff);
+    }
+    this.bubbleText.position.set(-w / 2 + 4, base - h + 2);
   }
 
   private draw() {
