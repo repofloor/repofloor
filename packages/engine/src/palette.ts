@@ -20,6 +20,27 @@ export const PALETTE = {
   roomStroke: 0x4a5265,
   roomFocus: 0x2a2440,
   roomMeeting: 0x24323a,
+
+  // Floor materials. Desaturated on purpose: colour is reserved for people, which is
+  // what keeps a crowded floor readable (docs/VISUAL_TARGET.md).
+  corridor: 0x343a47,
+  corridorAlt: 0x383e4b,
+  openFloor: 0x2b2f3a,
+  openFloorAlt: 0x2f3440,
+  roomFloorTeam: 0x2a3340,
+  roomFloorMeeting: 0x26323a,
+  roomFloorFocus: 0x2c2740,
+
+  // Walls are drawn as a body plus a lit top edge, which is what reads as height
+  // from directly above.
+  wallFace: 0x14171d,
+  wallEdge: 0x474e5e,
+  doorFrame: 0x6b7280,
+
+  carpet: 0x3b3340,
+  metal: 0x4b5563,
+  metalDark: 0x374151,
+  paper: 0xe5e7eb,
   ok: 0x4ade80,
   warn: 0xfacc15,
   bad: 0xf87171,

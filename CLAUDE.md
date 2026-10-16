@@ -30,6 +30,7 @@ Playwright screenshot of the demo (used for README / visual checks):
 packages/protocol   OfficeState / OfficeEvent contract. Plain JSON types, zero deps. PROTOCOL_VERSION semver.
 packages/reducer    reduce(state, event), decay(state, now), replay(), githubToEvents(webhook). PURE.
 packages/engine     Pixi.js v8 renderer. OfficeRenderer.mount/setState/applyEffect. Procedural pixel art.
+                    layout.ts is a floor-plan generator (cell grid: wall/door/corridor/open/room) and is tested.
 apps/demo           Vite app; simulator.ts fakes a team + 2 agents. Also the static page Lite publishes.
 apps/lite-action    GitHub Action. collect.ts (REST → events → replay) + main.ts. dist/index.js IS COMMITTED.
 apps/api            GitHub App webhook receiver (Full mode). Signature check → githubToEvents → reduce → GET /office/:owner/:repo.
@@ -57,7 +58,13 @@ docs/               ARCHITECTURE, PROTOCOL, LITE, ROADMAP, CONTRIBUTING-adjacent
 - `Omit<UnionType, K>` collapses the union — use the distributive helper pattern in `apps/lite-action/src/collect.ts`.
 - `pnpm -r run build` must build packages before apps; root `build` script already orders it.
 - Demo fetches `./office-state.json`; if present (Lite), the simulator is skipped.
-- Layout is deterministic from state (`computeLayout`); desk order is by `hash(login)`, not alphabetical, on purpose.
+- Layout is deterministic from state (`computeLayout`), which is a *floor-plan* generator: it emits a cell grid
+  (`wall`/`door`/`corridor`/`open`/`room`) plus desks, rooms and props. `isWalkable` reads that grid, and A* (#5)
+  should too. Desk order is by `hash(login)`, not alphabetical, on purpose; people are seated round-robin across
+  pods so one pod is never crowded beside an empty one.
+- `packages/engine/tests/layout.test.ts` covers the plan's invariants (shell closed, every room reachable through
+  its own door, no overlapping rooms, no two actors in one chair). The rest of the engine is still visual and
+  untested — the Playwright screenshot workflow is issue #16.
 - Status priority table lives in `packages/reducer/src/index.ts` (`PRIORITY`) and `docs/PROTOCOL.md` — keep them in sync.
 
 ## Conventions

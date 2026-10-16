@@ -1,6 +1,6 @@
 import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
 import type { OfficeEvent, OfficeState, ActorState } from "@repofloor/protocol";
-import { computeLayout, TILE, type Layout } from "./layout.js";
+import { cellAt, computeLayout, TILE, type Layout } from "./layout.js";
 import { Avatar } from "./avatar.js";
 import { PALETTE, hash } from "./palette.js";
 
@@ -153,9 +153,9 @@ export class OfficeRenderer {
         });
         this.avatars.set(a.actor.id, av);
         this.actorLayer.addChild(av);
-        // new actors enter through the door
-        const door = layout.props.find((p) => p.kind === "door")!;
-        av.moveTo(door.tx, door.ty - 1, true);
+        // New actors walk in through the entrance, which is a gap in the bottom wall
+        // rather than a prop now that the shell is drawn from the cell grid.
+        av.moveTo(layout.entrance.tx, layout.entrance.ty - 1, true);
         av.moveTo(target.tx, target.ty);
       } else {
         av.setState(a);
@@ -244,51 +244,113 @@ export class OfficeRenderer {
 
   private drawStatic(state: OfficeState, layout: Layout) {
     const g = this.floorLayer.clear();
-    const W = layout.cols * TILE;
-    const H = layout.rows * TILE;
-    // floor checker
+
+    // ── floor ──────────────────────────────────────────────────────────────
+    // One pass over the grid. Each cell kind gets its own material, which is what
+    // makes a room read as a room rather than as a tinted rectangle.
     for (let y = 0; y < layout.rows; y++) {
       for (let x = 0; x < layout.cols; x++) {
-        g.rect(x * TILE, y * TILE, TILE, TILE).fill((x + y) % 2 ? PALETTE.floor : PALETTE.floorAlt);
+        const cell = cellAt(layout, x, y);
+        if (cell === "wall" || cell === "outside") continue;
+        const checker = (x + y) % 2 === 0;
+        let fill: number;
+        if (cell === "corridor" || cell === "door") {
+          fill = checker ? PALETTE.corridor : PALETTE.corridorAlt;
+        } else if (cell === "room") {
+          const box = layout.rooms[layout.roomIndex[y * layout.cols + x] ?? -1];
+          const kind = box?.room.kind;
+          fill =
+            kind === "meeting"
+              ? PALETTE.roomFloorMeeting
+              : kind === "focus"
+                ? PALETTE.roomFloorFocus
+                : PALETTE.roomFloorTeam;
+        } else {
+          fill = checker ? PALETTE.openFloor : PALETTE.openFloorAlt;
+        }
+        g.rect(x * TILE, y * TILE, TILE, TILE).fill(fill);
       }
     }
-    // walls
-    g.rect(0, 0, W, TILE).fill(PALETTE.wall).rect(0, TILE, W, 3).fill(PALETTE.wallTop);
-    g.rect(0, 0, TILE / 2, H).fill(PALETTE.wall).rect(W - TILE / 2, 0, TILE / 2, H).fill(PALETTE.wall).rect(0, H - TILE, W, TILE).fill(PALETTE.wall);
+
+    // ── walls ──────────────────────────────────────────────────────────────
+    // A wall is a dark body plus a lit edge on whichever side faces into a space.
+    // Seen from directly above that edge is the only cue for height, and without it
+    // the plan flattens into outlines.
+    for (let y = 0; y < layout.rows; y++) {
+      for (let x = 0; x < layout.cols; x++) {
+        if (cellAt(layout, x, y) !== "wall") continue;
+        const px = x * TILE;
+        const py = y * TILE;
+        g.rect(px, py, TILE, TILE).fill(PALETTE.wallFace);
+
+        const lit = (dx: number, dy: number): boolean => {
+          const n = cellAt(layout, x + dx, y + dy);
+          return n !== "wall" && n !== "outside";
+        };
+        const E = 3;
+        if (lit(0, 1)) g.rect(px, py + TILE - E, TILE, E).fill(PALETTE.wallEdge);
+        if (lit(0, -1)) g.rect(px, py, TILE, E - 1).fill(PALETTE.wallTop);
+        if (lit(-1, 0)) g.rect(px, py, E - 1, TILE).fill(PALETTE.wallTop);
+        if (lit(1, 0)) g.rect(px + TILE - (E - 1), py, E - 1, TILE).fill(PALETTE.wallTop);
+      }
+    }
+
+    // ── doorways ───────────────────────────────────────────────────────────
+    // The gap is already floor; these are the jambs either side of it, which is what
+    // makes an opening look deliberate instead of like a missing tile.
+    for (let y = 0; y < layout.rows; y++) {
+      for (let x = 0; x < layout.cols; x++) {
+        if (cellAt(layout, x, y) !== "door") continue;
+        const px = x * TILE;
+        const py = y * TILE;
+        const horizontal = cellAt(layout, x - 1, y) === "wall" && cellAt(layout, x + 1, y) === "wall";
+        if (horizontal) {
+          g.rect(px - 2, py + 2, 2, TILE - 4).fill(PALETTE.doorFrame);
+          g.rect(px + TILE, py + 2, 2, TILE - 4).fill(PALETTE.doorFrame);
+        } else {
+          g.rect(px + 2, py - 2, TILE - 4, 2).fill(PALETTE.doorFrame);
+          g.rect(px + 2, py + TILE, TILE - 4, 2).fill(PALETTE.doorFrame);
+        }
+      }
+    }
 
     this.propsLayer.removeChildren();
     this.roomLayer.removeChildren();
     this.monitors.clear();
 
-    // desks
+    // ── desks ──────────────────────────────────────────────────────────────
+    // A pod seats two rows facing each other, so the desk is above the chair for the
+    // back row and below it for the front row.
     for (const d of layout.desks) {
       const dg = new Graphics();
-      const x = (d.tx - 1) * TILE;
-      const y = (d.ty - 1) * TILE;
-      dg.rect(x, y + 4, TILE * 3, TILE - 4).fill(PALETTE.deskWood).rect(x, y + TILE - 3, TILE * 3, 3).fill(PALETTE.deskWoodDark);
-      // monitor (screen color is refreshed in setState via this.monitors)
+      const cx = d.tx * TILE;
+      const cy = d.ty * TILE;
+      const deskY = d.facing === "up" ? cy - TILE : cy + TILE;
+
+      dg.rect(cx - TILE, deskY + 4, TILE * 3, TILE - 4).fill(PALETTE.deskWood);
+      dg.rect(cx - TILE, deskY + TILE - 3, TILE * 3, 3).fill(PALETTE.deskWoodDark);
+
+      // The partition between the two rows: low, so avatars stay visible over it.
+      if (d.facing === "up") dg.rect(cx - TILE, deskY + 1, TILE * 3, 3).fill(PALETTE.metalDark);
+
       const mon = new Graphics();
-      mon.position.set(x + TILE, y);
+      mon.position.set(cx, deskY);
       this.monitors.set(d.actorId, mon);
       this.drawMonitor(mon, state.actors.find((a) => a.actor.id === d.actorId));
-      // chair
-      dg.rect(d.tx * TILE + 3, d.ty * TILE + 2, TILE - 6, TILE - 4).fill(PALETTE.chair);
+
+      dg.rect(cx + 3, cy + 2, TILE - 6, TILE - 4).fill(PALETTE.chair);
       this.propsLayer.addChild(dg, mon);
     }
 
-    // rooms
+    // ── room labels ────────────────────────────────────────────────────────
+    // The floor and the walls already say where a room is; this only says what it is.
     for (const r of layout.rooms) {
-      const rg = new Graphics();
-      const fill = r.room.kind === "focus" ? PALETTE.roomFocus : r.room.kind === "meeting" ? PALETTE.roomMeeting : PALETTE.roomFill;
-      rg.rect(r.tx * TILE, r.ty * TILE, r.tw * TILE, r.th * TILE).fill(fill).stroke({ width: 1, color: PALETTE.roomStroke });
-      // table
-      rg.roundRect((r.tx + 2.5) * TILE, (r.ty + 2.6) * TILE, 3 * TILE, TILE, 2).fill(PALETTE.deskWood);
       const label = new Text({ text: `${roomIcon(r.room.kind)} ${r.room.name}`, style: ROOM_LABEL });
-      label.position.set(r.tx * TILE + 3, r.ty * TILE + 2);
-      this.roomLayer.addChild(rg, label);
+      label.position.set(r.tx * TILE + 2, r.ty * TILE + 1);
+      this.roomLayer.addChild(label);
     }
 
-    // props
+    // ── props ──────────────────────────────────────────────────────────────
     for (const p of layout.props) {
       const pg = new Graphics();
       const x = p.tx * TILE;
@@ -296,26 +358,38 @@ export class OfficeRenderer {
       if (p.kind === "plant") {
         pg.rect(x + 5, y + 9, 6, 6).fill(PALETTE.pot).circle(x + 8, y + 6, 5).fill(PALETTE.plant).circle(x + 5, y + 8, 3).fill(PALETTE.plantDark);
       } else if (p.kind === "coffee") {
-        pg.rect(x + 2, y + 2, 12, 14).fill(0x374151).rect(x + 4, y + 4, 8, 4).fill(0x111318).rect(x + 6, y + 10, 4, 3).fill(0xf5f5f4);
+        pg.rect(x + 2, y + 2, 12, 14).fill(PALETTE.metalDark).rect(x + 4, y + 4, 8, 4).fill(PALETTE.monitor).rect(x + 6, y + 10, 4, 3).fill(0xf5f5f4);
         const steam = new Text({ text: "☕", style: new TextStyle({ fontSize: 8 }) });
         steam.position.set(x + 3, y - 10);
         this.propsLayer.addChild(steam);
+      } else if (p.kind === "printer") {
+        pg.rect(x + 1, y + 4, TILE - 2, TILE - 6).fill(PALETTE.metal);
+        pg.rect(x + 3, y + 2, TILE - 6, 3).fill(PALETTE.metalDark);
+        pg.rect(x + 3, y + 9, TILE - 6, 4).fill(PALETTE.paper);
+      } else if (p.kind === "cabinet") {
+        pg.rect(x + 1, y + 3, TILE - 2, TILE - 4).fill(PALETTE.metalDark);
+        pg.rect(x + 2, y + 5, TILE - 4, 3).fill(PALETTE.metal);
+        pg.rect(x + 2, y + 10, TILE - 4, 3).fill(PALETTE.metal);
+      } else if (p.kind === "sofa") {
+        pg.rect(x, y + 4, TILE * 3, TILE - 2).fill(PALETTE.carpet);
+        pg.rect(x, y + 2, TILE * 3, 4).fill(PALETTE.roomStroke);
+      } else if (p.kind === "table") {
+        pg.roundRect(x, y + 3, TILE * 4, TILE * 2 - 4, 3).fill(PALETTE.deskWood);
+        pg.roundRect(x + 2, y + 5, TILE * 4 - 4, TILE * 2 - 8, 2).fill(PALETTE.deskWoodDark);
       } else if (p.kind === "board") {
-        pg.rect(x, y - 2, TILE * 14, TILE + 2).fill(0xf8fafc).stroke({ width: 1, color: 0x94a3b8 });
+        pg.rect(x, y + 1, TILE * 14, TILE).fill(PALETTE.paper).stroke({ width: 1, color: 0x94a3b8 });
         this.propsLayer.addChild(pg);
-        this.board.position.set(x + 4, y + 1);
+        this.board.position.set(x + 4, y + 3);
         this.board.style.fill = 0x111318;
         this.propsLayer.addChild(this.board);
-        // repo title sits on the top wall: the bottom one is where avatars enter and
-        // park, and their name labels collided with it
-        this.title.position.set(TILE, 2);
+        // The title goes in the header strip under the top wall, beside the board.
+        // It used to sit on the wall itself, which the room band now occupies.
+        this.title.position.set(x, y - TILE + 3);
         this.propsLayer.addChild(this.title);
         continue;
       } else if (p.kind === "lamp") {
         this.lamp.position.set(x, y);
         this.propsLayer.addChild(this.lamp);
-      } else if (p.kind === "door") {
-        pg.rect(x - 2, y, TILE + 4, TILE).fill(0x8b5e3c).rect(x, y + 2, TILE, TILE - 2).fill(0x6e4529).rect(x + TILE - 4, y + 8, 2, 2).fill(0xfbbf24);
       }
       this.propsLayer.addChild(pg);
     }
