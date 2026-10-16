@@ -29,12 +29,16 @@ Playwright screenshot of the demo (used for README / visual checks):
 ```
 packages/protocol   OfficeState / OfficeEvent contract. Plain JSON types, zero deps. PROTOCOL_VERSION semver.
 packages/reducer    reduce(state, event), decay(state, now), replay(), githubToEvents(webhook). PURE.
+packages/collect    collect(): GitHub REST → OfficeEvent[] → replay → OfficeState. Shared by the Lite action and
+                    Full mode’s resync, deliberately one implementation (rule 1). `mode` and `userAgent` are options.
 packages/engine     Pixi.js v8 renderer. OfficeRenderer.mount/setState/applyEffect. Procedural pixel art.
                     layout.ts is a floor-plan generator (cell grid: wall/door/corridor/open/room) and is tested.
 apps/demo           Vite app; simulator.ts fakes a team + 2 agents. Also the static page Lite publishes.
-apps/lite-action    GitHub Action. collect.ts (REST → events → replay) + main.ts. dist/index.js IS COMMITTED.
+apps/lite-action    GitHub Action. main.ts over @repofloor/collect. dist/index.js IS COMMITTED (esbuild inlines the
+                    workspace packages, so nothing resolves @repofloor/* on the runner).
 apps/api            GitHub App webhook receiver (Full mode). Signature check → githubToEvents → reduce → GET /office/:owner/:repo.
-                    Store and publisher are interfaces with in-memory impls (ADR 0001). No runtime deps.
+                    Store and publisher are interfaces with in-memory impls (ADR 0001). resync.ts rebuilds an office
+                    from REST as the App on a timer — the only thing that uses the App identity. pg is the only dep.
 apps/realtime       ws fan-out per office. OfficeHub (no socket knowledge) + socket.ts (ws) + access.ts
                     (authorizes by asking apps/api, forwarding the caller’s credentials). Presence is in-process,
                     TTL’d, never persisted, and expressed as actor.upsert / actor.leave (ADR 0002).

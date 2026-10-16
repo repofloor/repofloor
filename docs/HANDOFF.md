@@ -177,6 +177,28 @@ _Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realti
 - `WEB_PORT` joins `POSTGRES_PORT`, `API_PORT` and `REALTIME_PORT`: 8080 is taken on a developer
   machine about as often as 5432 is.
 
+## Done (Phase 2D-3 — periodic resync)
+
+- `collect()` moved out of `apps/lite-action` into **`packages/collect`**, shared by the Lite action and
+  the api rather than copied. Rule 1 says Lite and Full must not fork, and a second copy of the collection
+  logic would have been exactly that. Two Lite-specific constants became options: `mode` (a resync must not
+  claim to be Lite — the engine reads it to know whether to expect live presence) and `userAgent`.
+- `apps/api/src/resync.ts`: rebuild an office from the REST API as the App, on a timer. This is the only
+  thing that uses the App identity for anything. It **replaces** the snapshot rather than merging into it,
+  because merging would preserve the staleness it exists to remove.
+- Why it exists: webhooks are a stream and streams have gaps — a delivery failing during a restart, GitHub
+  giving up retrying, `pg_notify` dropping anything sent while nothing listens, or an office created before
+  the App was installed. None of that is visible, because a snapshot quietly out of date looks exactly like
+  a quiet repository.
+- Behaviour worth knowing: one broken repository does not stop the sweep, and a failed repair leaves the old
+  snapshot alone rather than destroying it; an owner with no installation is skipped, not failed; offices
+  are swept one at a time, because GitHub's secondary rate limits are unkind to bursts; a sweep that
+  outlasts its own interval is skipped rather than stacked; and nothing runs on startup, which is when the
+  service can least spare the requests.
+- `RESYNC_INTERVAL_MS` (default 6h, `0` disables) and `RESYNC_HOURS` (default 72). It starts only with both
+  the App identity and Postgres, and the log says which one is missing when it does not.
+- 142 tests in `apps/api`, ten of them for this.
+
 ## Noted, not scheduled
 
 - **Visual target** ([`docs/VISUAL_TARGET.md`](VISUAL_TARGET.md), 2026-10-15): a pixel-art reference from the

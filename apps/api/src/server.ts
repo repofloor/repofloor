@@ -12,6 +12,10 @@
  *   PORT                      default 8787
  *   HOST                      default 0.0.0.0
  *   LOG_LEVEL                 debug | info | warn | error | silent (default info)
+ *   RESYNC_INTERVAL_MS        how often every office is rebuilt from the REST API as the
+ *                             App (default 6h). 0 turns it off. Needs the App identity
+ *                             and Postgres; without either it does not start.
+ *   RESYNC_HOURS              how far back a resync looks (default 72)
  *
  * Sign-in and the App identity are optional. Set them and `/auth/...` comes alive;
  * leave them unset and the service behaves exactly as before, with every caller
@@ -43,6 +47,7 @@ import {
 import { GitHubOAuth } from "./oauth.js";
 import { NoopEventPublisher, type EventPublisher } from "./publisher.js";
 import { PostgresEventPublisher } from "./publisher-postgres.js";
+import { scheduleResync, DEFAULT_RESYNC_INTERVAL_MS, type ResyncSchedule } from "./resync.js";
 import { InMemorySessionStore } from "./session.js";
 import { SignIn } from "./sign-in.js";
 import { InMemoryOfficeStore, type OfficeStore } from "./store.js";
@@ -137,6 +142,34 @@ const app = createApp({
     ...(Number.isFinite(ttl) && ttl > 0 ? { ttlMs: ttl } : {}),
   }),
 });
+/**
+ * Periodic resync (2D-3). Webhooks are a stream and streams have gaps; this is what
+ * closes them. It needs the App identity to mint installation tokens and a real store
+ * to have offices worth rebuilding, so it simply does not start without both.
+ */
+let resync: ResyncSchedule | undefined;
+const resyncInterval = Number(process.env["RESYNC_INTERVAL_MS"] ?? DEFAULT_RESYNC_INTERVAL_MS);
+if (appAuth && databaseUrl && Number.isFinite(resyncInterval) && resyncInterval > 0) {
+  const resyncHours = Number(process.env["RESYNC_HOURS"]);
+  resync = scheduleResync(
+    {
+      store,
+      publisher,
+      installations,
+      appAuth,
+      logger: log,
+      ...(apiUrl ? { apiUrl } : {}),
+      ...(Number.isFinite(resyncHours) && resyncHours > 0 ? { hours: resyncHours } : {}),
+    },
+    resyncInterval,
+  );
+  log.info("periodic resync scheduled", { intervalMs: resyncInterval });
+} else if (resyncInterval > 0) {
+  log.info("periodic resync off", {
+    reason: !appAuth ? "no App identity" : !databaseUrl ? "in-memory store" : "disabled",
+  });
+}
+
 const server = createServer(app.handler);
 
 server.listen(port, host, () => {
@@ -157,6 +190,7 @@ server.listen(port, host, () => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     log.info("shutting down", { signal });
+    resync?.stop();
     server.close(() => {
       close().then(
         () => process.exit(0),
