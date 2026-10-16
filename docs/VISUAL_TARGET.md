@@ -44,6 +44,37 @@ reference is a *building interior*. That gap is the work.
 - **Named rooms from fiction** (studio, broadcast desk). Our rooms come from GitHub
   Teams and PR huddles.
 
+## Sprite skins: looked at, not taken (2026-10-16)
+
+The structural pass closed most of the gap. The rest is texture, and texture means a
+tileset. We went looking for one and stopped, which is worth writing down so nobody
+spends the afternoon again.
+
+- **No complete CC0 office tileset appears to exist.** The clearly-CC0 top-down sets are
+  either fantasy/roguelike (Kenney, good art, wrong century) or prototype templates. The
+  one CC0 set actually tagged *office* — Bunker Office Tiles on OpenGameArt — is 8x8,
+  1.4 KB, and its author says it never got past a few tiles.
+- **The reference's own set has a free version, and it is non-commercial only.** LimeZu's
+  Modern Interiors free v2.2 is a real download (1 MB, two 16x16 sheets plus four
+  characters — enough for our roles). Its LICENSE.txt: *use and edit in non-commercial
+  projects; may not use or edit for commercial projects; may not resell.* Repofloor is
+  MIT and aimed at company repositories, so that cannot be the shipped or recommended
+  path — every commercial user downstream would be in breach, and MIT gives us no way to
+  stop them. For one person's own non-commercial office it is fine.
+- **The complete version ($1.20–$3) lifts the commercial restriction but still forbids
+  redistribution.** So even paid, the asset is supplied by whoever runs the office and is
+  never committed here.
+
+**Decision: the default stays procedural, and no tileset is adopted.** That is rule 5
+working as intended rather than a setback — the office has always had to look like
+something with no asset files at all.
+
+The asset-independent half of the skin layer exists on the `feat/skin-resolver`
+branch: a manifest format (which requires a credit line, because a sheet nobody can
+attribute is a sheet nobody can lawfully reuse) and the autotiling resolver, with 13
+tests. It is parked rather than merged — on its own it draws nothing, and merging a
+capability nothing calls is just dead code with a test suite.
+
 ## Where this lands
 
 ![The floor plan, after the Phase 1.5 structural pass](assets/office-floorplan.png)

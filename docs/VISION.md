@@ -106,6 +106,17 @@ explains *why*; the doc explains *what*. Append, don't rewrite.
   Two items of the visual target came along for free, since they are DOM and not engine work: the per-actor status
   strip and the activity log beside the canvas, which together are most of issue #15.
 
+- **2026-10-16 · No tileset adopted; the office stays procedural.** The floor-plan pass closed the structural half of
+  the visual target. The other half is texture, which needs a tileset, and there is no free one this project can use:
+  the clearly-CC0 top-down sets are fantasy or prototype art, and the reference’s own free version (LimeZu, Modern
+  Interiors free v2.2 — downloaded and read) is licensed for non-commercial projects only. Repofloor is MIT and aimed
+  at company repositories, so adopting it would put every commercial user downstream in breach, with no way for us to
+  prevent it. The paid version removes that restriction but still forbids redistribution, so an asset is never
+  committed here under any option. This is rule 5 working rather than failing: the default has always had to look
+  like something with no asset files at all. The asset-independent half of the skin layer (manifest format requiring
+  an attribution line, plus the autotiling resolver and its tests) is parked on a branch rather than merged, because
+  a capability nothing calls is dead code.
+
 ## Open questions (for the next conversation)
 
 - ~~Visual style: pixel-art (current) was chosen implicitly by the prototype; isometric/modern was offered and not decided.~~
