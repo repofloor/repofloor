@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collect, MAX_PAGES } from "../src/index.ts";
+import { collect, collectWithEvents, MAX_PAGES } from "../src/index.ts";
+import { emptyOfficeState } from "@repofloor/protocol";
+import { replay } from "@repofloor/reducer";
 
 const NOW = new Date("2026-10-15T10:00:00Z");
 const ago = (h: number) => new Date(NOW.getTime() - h * 3600_000).toISOString();
@@ -209,4 +211,48 @@ test("closed pull requests stop once a whole page predates the window", async ()
 
   const closedPages = asked.filter((p) => p.includes("/pulls") && p.includes("state=closed")).length;
   assert.equal(closedPages, 2, "it read the page of old ones, saw what it meant, and stopped");
+});
+
+test("collectWithEvents returns the events that built the snapshot, in order", async () => {
+  // History is replaying these, so the order they come back in has to be the order
+  // they were applied in — otherwise a replay lands on states the live path never had.
+  const { state, events } = await collectWithEvents({
+    owner: "repofloor",
+    repo: "repofloor",
+    token: "t",
+    fetchImpl: fakeFetch,
+    now: NOW,
+  });
+
+  assert.ok(events.length > 0);
+  assert.deepEqual(
+    events.map((e) => e.at),
+    [...events.map((e) => e.at)].sort(),
+    "events are in time order",
+  );
+  assert.ok(events.every((e) => e.officeId === state.office.id));
+  assert.ok(events.some((e) => e.type === "actor.upsert"), "the actors that seed the office are in there too");
+});
+
+test("replaying the returned events reproduces the snapshot", async () => {
+  // The guarantee the player depends on: feeding these back in gives the same office.
+  const { state, events } = await collectWithEvents({
+    owner: "repofloor",
+    repo: "repofloor",
+    token: "t",
+    fetchImpl: fakeFetch,
+    now: NOW,
+  });
+
+  const rebuilt = replay(
+    emptyOfficeState(state.building, state.office, state.mode),
+    events,
+    state.generatedAt,
+  );
+
+  assert.deepEqual(
+    rebuilt.actors.map((a) => [a.actor.id, a.status]).sort(),
+    state.actors.map((a) => [a.actor.id, a.status]).sort(),
+  );
+  assert.deepEqual(rebuilt.pullRequests.map((p) => p.number).sort(), state.pullRequests.map((p) => p.number).sort());
 });

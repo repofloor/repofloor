@@ -117,6 +117,16 @@ explains *why*; the doc explains *what*. Append, don't rewrite.
   an attribution line, plus the autotiling resolver and its tests) is parked on a branch rather than merged, because
   a capability nothing calls is dead code.
 
+- **2026-10-16 · History and replay, office-level only** (`docs/adr/0003-history-and-replay.md`). A repository
+  replayed from its first commit, scrubbable. The reducer being pure and taking its time from `event.at` (rule 2)
+  means the replay itself is nearly free — that rule paying for itself three phases later. What is missing is the
+  events: Lite throws them away after `replay()`, and Full keeps only ids in `applied_events` for dedup. The
+  boundary is the decision that mattered: replay shows an **office**, never a person. No per-person filter, no
+  highlighting one contributor through time, no author aggregation. We keep no durations and one snapshot cannot
+  answer "how long was Ali at his desk", but a scrubbable year of one person can, by inspection — and rule 6 exists
+  to prevent exactly that artifact. Lite gets a bounded version (its collected window); "from the first commit"
+  belongs to Full, because doing it in a static file would mean paging years of API on every run.
+
 ## Open questions (for the next conversation)
 
 - ~~Visual style: pixel-art (current) was chosen implicitly by the prototype; isometric/modern was offered and not decided.~~
