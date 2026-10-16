@@ -230,31 +230,78 @@ anything.
 
 ## Point a GitHub App at it
 
-1. Create a GitHub App (Settings → Developer settings → GitHub Apps → New).
-2. **Webhook URL**: your public URL + `/webhook`. For local development, tunnel it —
-   `gh webhook forward --repo <owner>/<repo> --events '*' --url http://localhost:8787/webhook`
-   or any tunnel of your choice.
-3. **Webhook secret**: the same value you pass as `WEBHOOK_SECRET`.
-4. Repository permissions, all read-only: Contents, Issues, Pull requests, Actions,
-   Checks, Metadata.
-5. Subscribe to events: Push, Pull request, Pull request review, Pull request review
-   comment, Issues, Issue comment, Workflow run, Check suite, plus Member and Repository
-   (the last two are what invalidate cached read decisions) and Installation (which is
-   what records an installation).
-6. For sign-in: **Callback URL** = `PUBLIC_BASE_URL/auth/github/callback`, exactly.
-   Generate a client secret, and tick "Request user authorization (OAuth) during
-   installation" if you want installing and signing in to be one trip.
-7. **Setup URL** = `PUBLIC_BASE_URL/auth/install/callback` (optionally with a
-   `?return_to=/…` of your own). Leave "Redirect on update" off unless you want the same
-   callback after permission changes.
-8. Generate a private key and give it to the service as `GITHUB_APP_PRIVATE_KEY` or
-   `GITHUB_APP_PRIVATE_KEY_PATH`, with the App id as `GITHUB_APP_ID`.
-9. Install the App on a repository, then do something in that repository and read the
-   office back:
+Walked end to end against real github.com on 2026-10-16. Where GitHub's own interface
+has moved or where a plausible-looking option breaks the flow, it is called out — most
+of what follows was learned by getting it wrong first.
+
+**Tunnel to the proxy, not to this service.** `apps/web` serves the page *and*
+reverse-proxies `api` and `realtime` onto one origin, and sign-in only works same-origin
+(the session cookie is `HttpOnly`/`SameSite=Lax` and `apps/api` sends no CORS headers).
+A tunnel pointed at `:8787` gives you webhooks and no page and no sign-in.
 
 ```bash
-curl -s localhost:8787/office/<owner>/<repo> | jq '.actors[] | {id: .actor.id, status, detail}'
+WEBHOOK_SECRET=… docker compose up --build -d     # proxy on :8080
+cloudflared tunnel --url http://localhost:8080    # prints your PUBLIC_BASE_URL
 ```
+
+A quick tunnel's address changes every time it restarts, and all four URLs below are
+tied to it. A domain you own saves re-editing the App each session.
+
+1. **Settings → Developer settings → GitHub Apps → New.**
+2. **Webhook URL** = `PUBLIC_BASE_URL/webhook`, **Active** ticked.
+3. **Webhook secret** = the same value you pass as `WEBHOOK_SECRET`. A mismatch is a
+   `401` on every delivery and nothing else.
+4. **Redirect URI** (under "Identifying and authorizing users") =
+   `PUBLIC_BASE_URL/auth/github/callback`, exactly. GitHub used to call this the
+   Callback URL.
+5. **Untick "Expire user authorization tokens".** It is ticked by default, and
+   `apps/api` has no refresh-token handling (`src/oauth.ts`): leave it on and a session
+   keeps working for eight hours, then silently stops — the cookie still resolves, but
+   GitHub rejects the token behind it and reads start answering `404`. Nothing in any
+   log says why. Supporting refresh tokens is the fix; until then, untick it.
+6. **Leave "Request user authorization (OAuth) during installation" unticked.** It looks
+   like it saves a round trip and it breaks the flow: with it on, *GitHub* starts the
+   OAuth leg, so there is no `state` of ours to echo, and `/auth/github/callback`
+   refuses with `400 missing_code_or_state` — it requires `state` and matches it against
+   a cookie it set (`src/sign-in.ts`). Ticking it also disables the Setup URL below.
+7. **Setup URL** = `PUBLIC_BASE_URL/auth/install/callback?return_to=/installed`. Leave
+   "Redirect on update" off unless you want the same callback after permission changes.
+8. **Repository permissions**, all read-only: Contents, Issues, Pull requests, Actions,
+   Checks, Metadata. Organization, Account and Enterprise permissions are not needed —
+   reading the signed-in user's own identity takes none.
+9. **Subscribe to events** — the list only appears once permissions are set, because
+   GitHub derives it from them: Push, Pull request, Pull request review, Pull request
+   review comment, Issues, Issue comment, Workflow run, Check suite, Repository.
+   - **`Member` may not be offered**, since it needs an organization permission. Without
+     it, a change to who can read a repo waits out the 60-second access cache instead of
+     being invalidated early. A delay, not a hole.
+   - **`Installation` is not in the list** and does not need to be: GitHub delivers
+     installation events to every App unconditionally.
+10. **Credentials → Key pairs → New key** for the private key, and **Client secrets →
+    Generate** on the same page for the OAuth secret. GitHub moved both here from the
+    bottom of the General tab; its own documentation still disagrees with itself about
+    where they live.
+11. Give the service the values. The private key is a multi-line PEM and the environment
+    wants one line, so:
+
+```bash
+node scripts/pem-to-env.mjs ~/Downloads/your-app.*.private-key.pem
+```
+
+`GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` must be set **together** — half-configured
+is treated as a mistake and the service refuses to start rather than run without an App
+identity you thought you had given it.
+
+12. **Install App → your account → a repository.** Then open `PUBLIC_BASE_URL`, sign in,
+    and push something to that repository.
+
+```bash
+WEBHOOK_SECRET=… PROXY=PUBLIC_BASE_URL pnpm smoke     # the same 17 checks, real GitHub
+curl -s PUBLIC_BASE_URL/office/<owner>/<repo> | jq '.actors[] | {id: .actor.id, status, detail}'
+```
+
+The startup line says which halves are live: look for `"signIn":"enabled"` and
+`"appIdentity":"configured"`, and no warning after them.
 
 ### Send a delivery by hand
 
@@ -267,6 +314,12 @@ curl -s -X POST localhost:8787/webhook \
   -H "x-github-delivery: $(uuidgen)" \
   -H "x-hub-signature-256: $SIG" \
   -d "$BODY"
+```
+
+No `openssl` — a plain Windows shell, for one? Node signs it just as well:
+
+```bash
+SIG=$(node -e "console.log('sha256='+require('crypto').createHmac('sha256',process.env.WEBHOOK_SECRET).update(process.argv[1]).digest('hex'))" "$BODY")
 ```
 
 ## Test
