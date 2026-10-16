@@ -48,7 +48,27 @@ const n = (v: unknown, d = 0): number => (typeof v === "number" ? v : d);
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const login = (u: unknown): string => s(o(u)["login"]);
 
+/**
+ * The snapshot *and* the events that produced it.
+ *
+ * `collect` has always built the events and then thrown them away, which was fine while
+ * the only question was "what does the office look like now". History asks "what did it
+ * look like then", and the answer is these, replayed to that moment (ADR 0003).
+ *
+ * The events are returned in the order `replay` sorted them, so a caller can feed them
+ * back in without re-sorting and get exactly the same states along the way.
+ */
+export interface Collected {
+  state: OfficeState;
+  events: OfficeEvent[];
+}
+
+/** The snapshot alone. What most callers want, and what this has always returned. */
 export async function collect(opts: CollectOptions): Promise<OfficeState> {
+  return (await collectWithEvents(opts)).state;
+}
+
+export async function collectWithEvents(opts: CollectOptions): Promise<Collected> {
   const now = opts.now ?? new Date();
   const since = new Date(now.getTime() - (opts.hours ?? 48) * 3600_000);
   const api = opts.apiBase ?? "https://api.github.com";
@@ -244,5 +264,8 @@ export async function collect(opts: CollectOptions): Promise<OfficeState> {
     actor,
   }));
 
-  return replay(state, [...upserts, ...events], now.toISOString());
+  // Sorted here rather than inside replay, so the caller gets back exactly the order
+  // the states were produced in and can replay them without re-deriving it.
+  const all = [...upserts, ...events].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  return { state: replay(state, all, now.toISOString()), events: all };
 }

@@ -288,7 +288,7 @@ var s = (v, d = "") => typeof v === "string" ? v : d;
 var n = (v, d = 0) => typeof v === "number" ? v : d;
 var arr = (v) => Array.isArray(v) ? v : [];
 var login = (u) => s(o(u)["login"]);
-async function collect(opts) {
+async function collectWithEvents(opts) {
   const now = opts.now ?? /* @__PURE__ */ new Date();
   const since = new Date(now.getTime() - (opts.hours ?? 48) * 36e5);
   const api = opts.apiBase ?? "https://api.github.com";
@@ -308,17 +308,17 @@ async function collect(opts) {
     return r.json();
   };
   const getPages = async (path, perPage, stop, maxPages = MAX_PAGES) => {
-    const all = [];
+    const all2 = [];
     for (let page = 1; page <= maxPages; page++) {
       const join2 = path.includes("?") ? "&" : "?";
       const items = arr(await get(`${path}${join2}per_page=${perPage}&page=${page}`));
-      all.push(...items);
+      all2.push(...items);
       if (items.length < perPage)
         break;
       if (stop?.(items))
         break;
     }
-    return all;
+    return all2;
   };
   const full = `${opts.owner}/${opts.repo}`;
   const repoResponse = await f(`${api}/repos/${full}`, { headers });
@@ -440,7 +440,8 @@ async function collect(opts) {
     type: "actor.upsert",
     actor
   }));
-  return replay(state, [...upserts, ...events], now.toISOString());
+  const all = [...upserts, ...events].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  return { state: replay(state, all, now.toISOString()), events: all };
 }
 
 // src/main.ts
@@ -460,9 +461,13 @@ async function main() {
   const token = input("token", process.env["GITHUB_TOKEN"]);
   const hours = Number(input("hours", "48"));
   const outDir = input("output-dir", "repofloor-site");
-  const state = await collect({ owner, repo, token, hours });
+  const { state, events } = await collectWithEvents({ owner, repo, token, hours });
   await mkdir(outDir, { recursive: true });
   await writeFile(join(outDir, "office-state.json"), JSON.stringify(state, null, 2));
+  await writeFile(
+    join(outDir, "office-events.json"),
+    JSON.stringify({ officeId: state.office.id, hours, generatedAt: state.generatedAt, events }, null, 2)
+  );
   const here = dirname(fileURLToPath(import.meta.url));
   const site = join(here, "site");
   try {
@@ -474,7 +479,7 @@ async function main() {
   }
   await retitle(join(outDir, "index.html"), repoFull);
   const online = state.actors.filter((a) => a.status !== "offline").length;
-  console.log(`repofloor: ${state.actors.length} actors (${online} active), ${state.pullRequests.length} open PRs, CI=${state.defaultBranchCi ?? "n/a"} \u2192 ${outDir}/`);
+  console.log(`repofloor: ${state.actors.length} actors (${online} active), ${state.pullRequests.length} open PRs, ${events.length} events over ${hours}h, CI=${state.defaultBranchCi ?? "n/a"} \u2192 ${outDir}/`);
   if (process.env["GITHUB_OUTPUT"]) {
     await writeFile(process.env["GITHUB_OUTPUT"], `output-dir=${outDir}
 actors=${state.actors.length}
