@@ -36,15 +36,27 @@ async function main() {
   await mkdir(outDir, { recursive: true });
   await writeFile(join(outDir, "office-state.json"), JSON.stringify(state, null, 2));
 
-  // copy the prebuilt static office page (dist/site) next to the json
+  // Copy the prebuilt static office page (dist/site) next to the json.
+  //
+  // This used to warn and carry on. That is the wrong failure: the step stays green,
+  // Pages publishes a directory with no index.html, and the first anyone knows is a
+  // 404 on their own office. Nothing in the run says why. A missing bundle means the
+  // action was published wrong, which is ours to fix and theirs to be told about
+  // immediately — so it throws.
   const here = dirname(fileURLToPath(import.meta.url));
   const site = join(here, "site");
   try {
     await cp(site, outDir, { recursive: true });
-    await retitle(join(outDir, "index.html"), repoFull);
-  } catch {
-    console.warn("repofloor: static site bundle not found at", site, "- only office-state.json written");
+  } catch (err) {
+    throw new Error(
+      `repofloor: the static office page is missing from this action (looked in ${site}). ` +
+        `The snapshot was built, but publishing ${outDir} would give you a page that 404s. ` +
+        `This is a packaging fault in the action, not something wrong with your repository — ` +
+        `please open an issue at https://github.com/repofloor/repofloor/issues. ` +
+        `Cause: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
+  await retitle(join(outDir, "index.html"), repoFull);
 
   const online = state.actors.filter((a) => a.status !== "offline").length;
   console.log(`repofloor: ${state.actors.length} actors (${online} active), ${state.pullRequests.length} open PRs, CI=${state.defaultBranchCi ?? "n/a"} → ${outDir}/`);
