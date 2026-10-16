@@ -90,9 +90,11 @@ backfill arrives into something already proven.
 **Office-level only.** No per-person filter, no highlighting one contributor through
 time. Rule 6, and ADR 0003 decision 1.
 
-- [ ] **H1** Lite publishes the events it already collected, beside the snapshot it
-      already publishes — a window, and any sub-range inside it
-- [ ] **H2** A player over those: scrub, play/pause, speed, feeding `applyEffect`
+- [x] **H1** Lite publishes the events it already collected, beside the snapshot it
+      already publishes — `office-events.json`, a window and any sub-range inside it
+- [x] **H2** A player over those: scrub, play/pause, speed, feeding `applyEffect`
+      — the arithmetic is `packages/replay`, shared with the hosted player rather
+      than written twice
 - [x] **H3** `apps/api` stores event bodies on ingest, in the transaction that saves the
       snapshot. A table beside `applied_events`, which stays a dedup ledger
 - [x] **H4** Backfill as the App: unbounded, resumable historical collection
