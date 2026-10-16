@@ -74,8 +74,11 @@ none of it is scheduled, and Phase 2 stays ahead of it.
 - [x] Rooms as architecture: interior walls, doorways, a corridor — not tinted regions
 - [x] Furniture parameterised by room kind (meeting table, sofa, plants), still procedural
 - [x] Palette pass: desaturated furniture, colour reserved for people
-- [ ] Sprite-sheet skin as an optional layer (the reference is a bought tileset; rule 5
-      keeps procedural the default and makes this a layer on top)
+- ~~Sprite-sheet skin as an optional layer~~ — **looked at and not taken** (2026-10-16).
+      No complete CC0 office tileset exists; the reference’s own free version is
+      non-commercial only, which an MIT project aimed at company repos cannot adopt.
+      The reasoning is in [VISUAL_TARGET](VISUAL_TARGET.md); the resolver is parked on a
+      branch. The default stays procedural, which is what rule 5 always required.
 
 ## Phase 3 — Agents
 - [ ] Agent tokens; `POST /agent/events`
