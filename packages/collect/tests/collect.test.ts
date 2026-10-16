@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collect } from "../src/collect.ts";
+import { collect } from "../src/index.ts";
 
 const NOW = new Date("2026-10-15T10:00:00Z");
 const ago = (h: number) => new Date(NOW.getTime() - h * 3600_000).toISOString();

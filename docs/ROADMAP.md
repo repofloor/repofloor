@@ -56,8 +56,8 @@ Ordered: each sub-phase unblocks the next. 2A is prerequisites the later ones ne
       both services onto one origin — `docker compose up` now gives you a page at :8080
 - [ ] **D2** Create the App on github.com and walk webhook + sign-in once against the real thing
       (everything so far is covered only against a faked GitHub)
-- [ ] **D3** Periodic resync as the App: mint an installation token, rebuild an office from REST
-      (the `collect.ts` shape Lite uses)
+- [x] **D3** Periodic resync as the App: mint an installation token, rebuild an office from REST
+      — `collect` moved to `packages/collect` and is now shared rather than copied (rule 1)
 - [ ] **D4** Sessions across restarts and instances (`SessionStore`) — only when running in more
       than one place actually hurts
 

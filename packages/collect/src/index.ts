@@ -2,8 +2,15 @@
  * Collects recent repository activity through the GitHub REST API and turns it into
  * OfficeEvents, then replays them into an OfficeState snapshot.
  *
- * Runs inside a GitHub Action with the default GITHUB_TOKEN — no extra secrets.
- * Uses only public-ish data (commits, PRs, issues, workflow runs, contributors).
+ * Two callers, deliberately one implementation (CLAUDE.md rule 1 — Lite and Full must
+ * not fork):
+ *
+ * - the Lite action, inside a GitHub Action with the default `GITHUB_TOKEN`;
+ * - Full mode's periodic resync, with an installation token minted from the App.
+ *
+ * Both read the same public-ish data (commits, PRs, issues, workflow runs,
+ * contributors) and get back a whole snapshot rather than a diff, which is what makes
+ * this usable as a repair: whatever a deployment missed, a resync lands on the truth.
  */
 
 import { emptyOfficeState, type OfficeEvent, type OfficeState, type Actor } from "@repofloor/protocol";
@@ -18,6 +25,13 @@ export interface CollectOptions {
   apiBase?: string;
   fetchImpl?: typeof fetch;
   now?: Date;
+  /**
+   * What the snapshot says it is. Lite has no live presence and the engine reads this
+   * to know what to expect, so a resync for Full mode must not claim to be Lite.
+   */
+  mode?: OfficeState["mode"];
+  /** Sent as `User-Agent`; GitHub asks for one that identifies the caller. */
+  userAgent?: string;
 }
 
 type Obj = Record<string, unknown>;
@@ -36,7 +50,7 @@ export async function collect(opts: CollectOptions): Promise<OfficeState> {
     Authorization: `Bearer ${opts.token}`,
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "repofloor-lite",
+    "User-Agent": opts.userAgent ?? "repofloor-lite",
   };
   const get = async (path: string): Promise<unknown> => {
     const r = await f(`${api}${path}`, { headers });
@@ -65,7 +79,7 @@ export async function collect(opts: CollectOptions): Promise<OfficeState> {
       defaultBranch,
       private: repo["private"] === true,
     },
-    "lite",
+    opts.mode ?? "lite",
   );
 
   const events: OfficeEvent[] = [];

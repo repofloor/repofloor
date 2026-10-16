@@ -281,7 +281,7 @@ function replay(initial, events, nowIso) {
   return nowIso ? decay(out, nowIso) : out;
 }
 
-// src/collect.ts
+// ../../packages/collect/dist/index.js
 var o = (v) => typeof v === "object" && v !== null ? v : {};
 var s = (v, d = "") => typeof v === "string" ? v : d;
 var n = (v, d = 0) => typeof v === "number" ? v : d;
@@ -296,35 +296,33 @@ async function collect(opts) {
     Authorization: `Bearer ${opts.token}`,
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "repofloor-lite"
+    "User-Agent": opts.userAgent ?? "repofloor-lite"
   };
   const get = async (path) => {
     const r = await f(`${api}${path}`, { headers });
-    if (r.status === 404 || r.status === 409) return [];
-    if (!r.ok) throw new Error(`GitHub API ${r.status} for ${path}`);
+    if (r.status === 404 || r.status === 409)
+      return [];
+    if (!r.ok)
+      throw new Error(`GitHub API ${r.status} for ${path}`);
     return r.json();
   };
   const full = `${opts.owner}/${opts.repo}`;
   const repo = o(await get(`/repos/${full}`));
   const ownerObj = o(repo["owner"]);
   const defaultBranch = s(repo["default_branch"], "main");
-  const state = emptyOfficeState(
-    {
-      id: opts.owner,
-      name: opts.owner,
-      kind: s(ownerObj["type"]) === "Organization" ? "organization" : "user",
-      avatarUrl: s(ownerObj["avatar_url"])
-    },
-    {
-      id: full,
-      buildingId: opts.owner,
-      name: opts.repo,
-      description: s(repo["description"]),
-      defaultBranch,
-      private: repo["private"] === true
-    },
-    "lite"
-  );
+  const state = emptyOfficeState({
+    id: opts.owner,
+    name: opts.owner,
+    kind: s(ownerObj["type"]) === "Organization" ? "organization" : "user",
+    avatarUrl: s(ownerObj["avatar_url"])
+  }, {
+    id: full,
+    buildingId: opts.owner,
+    name: opts.repo,
+    description: s(repo["description"]),
+    defaultBranch,
+    private: repo["private"] === true
+  }, opts.mode ?? "lite");
   const events = [];
   const actors = /* @__PURE__ */ new Map();
   const ev = (id, at, e) => {
@@ -332,7 +330,8 @@ async function collect(opts) {
   };
   const seen = (u) => {
     const id = login(u);
-    if (!id) return "";
+    if (!id)
+      return "";
     if (!actors.has(id)) {
       actors.set(id, {
         id,
@@ -343,17 +342,20 @@ async function collect(opts) {
     }
     return id;
   };
-  for (const c of arr(await get(`/repos/${full}/contributors?per_page=30`))) seen(c);
+  for (const c of arr(await get(`/repos/${full}/contributors?per_page=30`)))
+    seen(c);
   for (const c of arr(await get(`/repos/${full}/commits?since=${since.toISOString()}&per_page=100`))) {
     const co = o(c);
     const author = seen(co["author"]);
     const at = s(o(o(co["commit"])["author"])["date"], now.toISOString());
-    if (author) ev(`c:${s(co["sha"])}`, at, { type: "push", actorId: author, branch: defaultBranch, commits: 1, url: s(co["html_url"]) });
+    if (author)
+      ev(`c:${s(co["sha"])}`, at, { type: "push", actorId: author, branch: defaultBranch, commits: 1, url: s(co["html_url"]) });
   }
   for (const p of arr(await get(`/repos/${full}/pulls?state=all&sort=updated&direction=desc&per_page=50`))) {
     const po = o(p);
     const updated = s(po["updated_at"]);
-    if (Date.parse(updated) < since.getTime() && s(po["state"]) !== "open") continue;
+    if (Date.parse(updated) < since.getTime() && s(po["state"]) !== "open")
+      continue;
     const author = seen(po["user"]);
     const reviewerIds = arr(po["requested_reviewers"]).map(seen).filter(Boolean);
     const pr = {
@@ -371,12 +373,14 @@ async function collect(opts) {
       ev(`pr:${pr.number}:merged`, s(po["merged_at"]), { type: "pr.merged", number: pr.number, actorId: author });
     } else if (s(po["state"]) === "open") {
       ev(`pr:${pr.number}:open`, updated, { type: "pr.opened", pr });
-      if (author) ev(`pr:${pr.number}:push`, updated, { type: "push", actorId: author, branch, commits: 0, url: pr.url });
+      if (author)
+        ev(`pr:${pr.number}:push`, updated, { type: "push", actorId: author, branch, commits: 0, url: pr.url });
     }
   }
   for (const i of arr(await get(`/repos/${full}/issues?state=all&sort=updated&direction=desc&since=${since.toISOString()}&per_page=50`))) {
     const io = o(i);
-    if (io["pull_request"]) continue;
+    if (io["pull_request"])
+      continue;
     const author = seen(io["user"]);
     const issue = {
       number: n(io["number"]),
@@ -385,8 +389,10 @@ async function collect(opts) {
       url: s(io["html_url"]),
       updatedAt: s(io["updated_at"])
     };
-    if (s(io["state"]) === "open") ev(`i:${issue.number}`, s(io["updated_at"]), { type: "issue.opened", issue, actorId: author });
-    else ev(`i:${issue.number}:closed`, s(io["closed_at"], s(io["updated_at"])), { type: "issue.closed", number: issue.number, actorId: author });
+    if (s(io["state"]) === "open")
+      ev(`i:${issue.number}`, s(io["updated_at"]), { type: "issue.opened", issue, actorId: author });
+    else
+      ev(`i:${issue.number}:closed`, s(io["closed_at"], s(io["updated_at"])), { type: "issue.closed", number: issue.number, actorId: author });
   }
   const runs = arr(o(await get(`/repos/${full}/actions/runs?per_page=20`))["workflow_runs"]);
   for (const r of runs) {

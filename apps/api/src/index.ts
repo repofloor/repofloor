@@ -118,5 +118,15 @@ export {
   type Logger,
   type LoggerOptions,
 } from "./log.js";
+export {
+  resyncAll,
+  resyncOffice,
+  scheduleResync,
+  DEFAULT_RESYNC_HOURS,
+  DEFAULT_RESYNC_INTERVAL_MS,
+  type ResyncDeps,
+  type ResyncOutcome,
+  type ResyncSchedule,
+} from "./resync.js";
 export { SIGNATURE_HEADER, signWebhook, verifyWebhookSignature } from "./signature.js";
 export { KeyedQueue } from "./serialize.js";

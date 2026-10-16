@@ -15,7 +15,8 @@
   "dependencies": {
     "@repofloor/protocol": "workspace:*",
     "@repofloor/reducer": "workspace:*",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "@repofloor/collect": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

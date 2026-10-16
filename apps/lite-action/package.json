@@ -7,11 +7,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/bundle.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --import tsx tests/*.test.ts"
+    "test": "echo \"lite-action: collection is tested in @repofloor/collect\""
   },
   "dependencies": {
     "@repofloor/protocol": "workspace:*",
-    "@repofloor/reducer": "workspace:*"
+    "@repofloor/reducer": "workspace:*",
+    "@repofloor/collect": "workspace:*"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

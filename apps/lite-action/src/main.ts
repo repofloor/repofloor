@@ -5,7 +5,7 @@
 import { mkdir, writeFile, readFile, cp } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { collect } from "./collect.js";
+import { collect } from "@repofloor/collect";
 
 function input(name: string, fallback?: string): string {
   const v = process.env[`INPUT_${name.toUpperCase().replace(/-/g, "_")}`] ?? fallback;
