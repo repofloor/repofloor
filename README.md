@@ -1,8 +1,11 @@
 <p align="center">
-  <img src="docs/assets/office.png" alt="Repofloor demo office" width="720" />
+  <img src="docs/assets/office-floorplan.png" alt="A Repofloor office: rooms, desks, and the people at them" width="720" />
 </p>
 
-<h1 align="center">🏢 Repofloor</h1>
+<h1 align="center">
+  <img src="docs/assets/icon.svg" alt="" width="28" height="28" align="absmiddle" />
+  Repofloor
+</h1>
 
 <p align="center"><b>A living pixel office for every GitHub repository.</b><br/>
 Your org is the building, each repo is an office, every contributor has a desk — and your coding agents sit right next to you.</p>
@@ -34,7 +37,7 @@ Repofloor turns GitHub activity into an animated 2D office:
 It ships in two flavours that share the **same engine**:
 
 - **Lite** — free, serverless. A GitHub Action snapshots your repo's recent activity into `office-state.json` and publishes a static office to GitHub Pages. One workflow file, no secrets, no server. *Available now.*
-- **Full** — hosted. Sign in with GitHub, see every repo you have access to as an office, live presence, agent telemetry, rooms and chat. *In progress — see [ROADMAP](docs/ROADMAP.md).*
+- **Full** — self-hosted. Sign in with GitHub, see every repo you can read as an office, live presence over a WebSocket, and a periodic resync that repairs whatever the webhook stream missed. *Built and running end to end — `docker compose up` brings up Postgres, the API, the realtime fan-out and the web UI behind one origin. Not hosted anywhere yet, so for now you run it yourself; see [docs/OPERATIONS.md](docs/OPERATIONS.md).*
 
 This repository dogfoods itself: **[visit our office →](https://repofloor.github.io/repofloor/)**
 Drag to pan, scroll or use the **+ / −** buttons to zoom, double-click to fit the whole floor.
@@ -69,20 +72,31 @@ jobs:
 
 Details, options and the privacy notes are in [docs/LITE.md](docs/LITE.md).
 
-## Run the demo locally
+## Run it locally
 
 ```bash
 pnpm install
 pnpm build
-pnpm dev          # http://localhost:5173 — simulated team + two agents
+pnpm dev          # http://localhost:5173 — the engine on a simulated team and two agents
 ```
+
+The whole of Full mode, in one command:
+
+```bash
+WEBHOOK_SECRET=dev-secret docker compose up --build   # then open http://localhost:8080
+WEBHOOK_SECRET=dev-secret pnpm smoke                  # 17 checks against the running stack
+```
+
+Pointing it at a real GitHub App takes about ten minutes and is written up, including the
+settings that look sensible and break the flow, in [apps/api/README.md](apps/api/README.md).
 
 ## Repository layout
 
 ```
 packages/protocol    Event & state schema — the contract everything speaks     (TypeScript, zero deps)
 packages/reducer     GitHub/agent events → OfficeState, pure & deterministic     (shared by Lite and Full)
-packages/engine      Pixi.js renderer: desks, rooms, avatars, animations
+packages/collect     GitHub REST → events → snapshot. One implementation, used by Lite and by Full's resync
+packages/engine      Pixi.js renderer: a floor plan with walls, doorways, rooms and the people in them
 apps/demo            The engine running on a simulated event stream; also the static page Lite publishes
 apps/lite-action     GitHub Action: REST snapshot → office-state.json + static page
 apps/api             GitHub App webhooks, snapshots, sign-in                     → docs/ARCHITECTURE.md
