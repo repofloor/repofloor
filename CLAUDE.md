@@ -17,7 +17,8 @@ pnpm build                   # packages → demo → lite-action bundle (order m
 pnpm dev                     # demo with simulated team, http://localhost:5173
 pnpm test                    # node --test via tsx (protocol, reducer, lite-action, api)
 pnpm typecheck
-pnpm smoke                   # 12 checks against a RUNNING compose stack (docker compose up first)
+pnpm smoke                   # 17 checks against a RUNNING compose stack (docker compose up first)
+node scripts/icon-png.mjs    # docs/assets/icon.svg -> icon-{16..512}.png. Rerun after changing the SVG.
 pnpm --filter @repofloor/reducer test   # single package
 ```
 
