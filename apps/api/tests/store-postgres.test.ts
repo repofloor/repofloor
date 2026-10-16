@@ -14,6 +14,7 @@ import { emptyOfficeState, type Building, type Office, type OfficeState } from "
 import { createPool, loadMigrations, migrate, type QueryResult, type Queryable } from "../src/db.ts";
 import { PostgresOfficeStore } from "../src/store-postgres.ts";
 import { PostgresInstallationStore } from "../src/installations.ts";
+import { PostgresBackfillStore } from "../src/backfill.ts";
 
 const building: Building = { id: "repofloor", name: "repofloor", kind: "organization" };
 const office: Office = { id: "repofloor/repofloor", buildingId: "repofloor", name: "repofloor", private: false };
@@ -262,4 +263,78 @@ test("without a pool there is nothing to isolate, so the body just runs", async 
   const store = new PostgresOfficeStore(db);
   assert.equal(await store.transaction("x", async (tx) => tx === store), true);
   assert.equal(db.calls.length, 0, "no begin/commit against a bare Queryable");
+});
+
+/*
+ * The backfill cursor's own SQL (005). The behaviour is tested against the in-memory
+ * store; what is tested here is that the Postgres one asks for the same thing, because
+ * a column the upsert forgets to write is a bug no in-memory test can see.
+ */
+
+test("saving a recovered office clears the backoff rather than leaving it set", async () => {
+  // Otherwise a step that got through goes on looking like a failing one for ever.
+  const db = new FakeDb().answer([]);
+  const store = new PostgresBackfillStore(db);
+
+  await store.save({
+    officeId: "repofloor/repofloor",
+    cursor: { pullsPage: 3, issuesPage: 1 },
+    done: false,
+    spent: 12,
+    failures: 0,
+  });
+
+  assert.match(db.sqlOf(0), /^insert into backfill_state/);
+  assert.match(db.sqlOf(0), /retry_after = excluded\.retry_after/);
+  assert.match(db.sqlOf(0), /parked_reason = excluded\.parked_reason/);
+  assert.deepEqual(db.calls[0]?.params.slice(4), [0, null, null]);
+});
+
+test("a parked office is saved with its reason, and not as done", async () => {
+  const db = new FakeDb().answer([]);
+  const store = new PostgresBackfillStore(db);
+
+  await store.save({
+    officeId: "repofloor/repofloor",
+    cursor: { pullsPage: 1, issuesPage: 1 },
+    done: false,
+    spent: 40,
+    failures: 10,
+    parked: "Not Found",
+  });
+
+  assert.deepEqual(db.calls[0]?.params.slice(2), [false, 40, 10, null, "Not Found"]);
+});
+
+test("the queue skips what is parked or still waiting", async () => {
+  const db = new FakeDb().answer([]);
+  await new PostgresBackfillStore(db).next();
+
+  const sql = db.sqlOf(0);
+  assert.match(sql, /b\.parked_reason is null/);
+  assert.match(sql, /b\.retry_after is null or b\.retry_after <= now\(\)/);
+  assert.match(sql, /b\.office_id is null/, "an office never walked is still picked up");
+  assert.match(sql, /order by b\.updated_at asc nulls first/, "least recently touched first, so nothing starves");
+});
+
+test("a row read back speaks ISO strings, whatever pg hands over", async () => {
+  const db = new FakeDb().answer([
+    {
+      cursor: { pullsPage: 2, issuesPage: 0 },
+      done: false,
+      spent: 7,
+      failures: 3,
+      retry_after: new Date("2026-10-16T12:00:00.000Z"),
+      parked_reason: null,
+    },
+  ]);
+
+  assert.deepEqual(await new PostgresBackfillStore(db).get("repofloor/repofloor"), {
+    officeId: "repofloor/repofloor",
+    cursor: { pullsPage: 2, issuesPage: 0 },
+    done: false,
+    spent: 7,
+    failures: 3,
+    retryAfter: "2026-10-16T12:00:00.000Z",
+  });
 });

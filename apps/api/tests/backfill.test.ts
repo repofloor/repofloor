@@ -14,6 +14,10 @@ import {
   backfillStep,
   InMemoryBackfillStore,
   scheduleBackfill,
+  retryDelayMs,
+  BACKOFF_BASE_MS,
+  BACKOFF_CAP_MS,
+  MAX_BACKFILL_FAILURES,
   type BackfillDeps,
 } from "../src/backfill.ts";
 import type { GitHubAppAuth } from "../src/app-auth.ts";
@@ -81,6 +85,7 @@ test("a step stores what it found and remembers where it stopped", async () => {
     cursor: { pullsPage: 2, issuesPage: 1 },
     done: false,
     spent: 4,
+    failures: 0,
   });
 });
 
@@ -151,7 +156,13 @@ test("a failed step does not advance the cursor past work it never stored", asyn
   const h = await harness(async () => {
     throw new Error("rate limited");
   });
-  await h.backfills.save({ officeId: OFFICE, cursor: { pullsPage: 4, issuesPage: 2 }, done: false, spent: 9 });
+  await h.backfills.save({
+    officeId: OFFICE,
+    cursor: { pullsPage: 4, issuesPage: 2 },
+    done: false,
+    spent: 9,
+    failures: 0,
+  });
 
   const outcome = await backfillStep(OFFICE, h.deps);
 
@@ -197,4 +208,218 @@ test("the scheduler picks up an office and stops once it is done", async () => {
   schedule.stop();
 
   assert.equal(calls, 1, "it walked the office once and then had nothing to do");
+});
+
+/*
+ * Backing off (005).
+ *
+ * Yielding the turn stopped one broken office starving the queue. It did not stop the
+ * waste: the same deleted repository came back every interval, for ever. What is
+ * tested here is that it waits, that waiting is forgotten the moment a step gets
+ * through, that waiting never costs a healthy office its turn, and that an office
+ * which is never coming back is parked rather than retried — visibly, and without
+ * being recorded as finished.
+ */
+
+/** A clock the test moves by hand, and a jitter that is not random. */
+function clock(start = Date.parse("2026-10-16T12:00:00.000Z")) {
+  let at = start;
+  return {
+    now: () => at,
+    advance: (ms: number) => (at += ms),
+    get at() {
+      return at;
+    },
+  };
+}
+
+const NO_JITTER = () => 0.5;
+
+test("the wait after a failure grows, and is capped", () => {
+  const plain = (failures: number) => retryDelayMs(failures, NO_JITTER);
+
+  assert.equal(plain(1), BACKOFF_BASE_MS);
+  assert.equal(plain(2), BACKOFF_BASE_MS * 2);
+  assert.equal(plain(3), BACKOFF_BASE_MS * 4);
+  assert.equal(plain(40), BACKOFF_CAP_MS, "doubling for ever would schedule a retry after the heat death");
+});
+
+test("the wait is jittered, so offices that broke together do not come back in lockstep", () => {
+  // They fail together far more often than alone: a rate limit, an outage, an
+  // installation someone removed.
+  const low = retryDelayMs(5, () => 0);
+  const high = retryDelayMs(5, () => 1);
+  assert.ok(low < high);
+  assert.ok(low >= BACKOFF_BASE_MS * 2 ** 4 * 0.7);
+});
+
+test("a failing office is told when to come back, and waits there", async () => {
+  const c = clock();
+  const h = await harness(async () => {
+    throw new Error("rate limited");
+  });
+  h.deps.now = c.now;
+  h.deps.random = NO_JITTER;
+  await h.backfills.enqueue(OFFICE);
+
+  const outcome = await backfillStep(OFFICE, h.deps);
+
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.status === "failed" && outcome.failures, 1);
+  assert.equal((await h.backfills.get(OFFICE))?.retryAfter, new Date(c.at + BACKOFF_BASE_MS).toISOString());
+});
+
+test("an office inside its backoff is not handed out", async () => {
+  const c = clock();
+  const backfills = new InMemoryBackfillStore(c.now);
+  await backfills.save({
+    officeId: OFFICE,
+    cursor: { pullsPage: 1, issuesPage: 1 },
+    done: false,
+    spent: 1,
+    failures: 2,
+    retryAfter: new Date(c.at + 60_000).toISOString(),
+  });
+
+  assert.equal(await backfills.next(), undefined, "still waiting");
+  c.advance(60_001);
+  assert.equal((await backfills.next())?.officeId, OFFICE, "and ready once the wait is over");
+});
+
+test("a healthy office keeps its turn while a broken one is backing off", async () => {
+  // The whole point. The first fix for starvation was to let a failing office yield;
+  // this must not reintroduce the opposite, where backing one off blocks the rest.
+  const c = clock();
+  const backfills = new InMemoryBackfillStore(c.now);
+  await backfills.save({
+    officeId: "broken/repo",
+    cursor: { pullsPage: 1, issuesPage: 1 },
+    done: false,
+    spent: 1,
+    failures: 3,
+    retryAfter: new Date(c.at + 600_000).toISOString(),
+  });
+  await backfills.enqueue(OFFICE);
+
+  assert.equal((await backfills.next())?.officeId, OFFICE);
+});
+
+test("a step that gets through forgets the failures before it", async () => {
+  // Consecutive, not cumulative: an office that was rate limited this morning should
+  // not be one failure from being parked this afternoon.
+  const c = clock();
+  const h = await harness(async () => ({
+    events: [],
+    actors: [],
+    cursor: { pullsPage: 3, issuesPage: 0 },
+    done: false,
+    spent: 2,
+  }));
+  h.deps.now = c.now;
+  await h.backfills.save({
+    officeId: OFFICE,
+    cursor: { pullsPage: 2, issuesPage: 0 },
+    done: false,
+    spent: 5,
+    failures: 4,
+    retryAfter: new Date(c.at - 1000).toISOString(),
+  });
+
+  await backfillStep(OFFICE, h.deps);
+  const record = await h.backfills.get(OFFICE);
+
+  assert.equal(record?.failures, 0);
+  assert.equal(record?.retryAfter, undefined, "and it is not still waiting for a moment that has passed");
+});
+
+test("an office that never recovers is parked, not retried for ever", async () => {
+  const c = clock();
+  const h = await harness(async () => {
+    throw new Error("Not Found");
+  });
+  h.deps.now = c.now;
+  h.deps.random = NO_JITTER;
+  await h.backfills.enqueue(OFFICE);
+
+  let last;
+  for (let i = 0; i < MAX_BACKFILL_FAILURES; i++) {
+    last = await backfillStep(OFFICE, h.deps);
+    c.advance(BACKOFF_CAP_MS);
+  }
+
+  assert.equal(last?.status, "parked");
+  const record = await h.backfills.get(OFFICE);
+  assert.equal(record?.parked, "Not Found");
+  assert.equal(record?.failures, MAX_BACKFILL_FAILURES);
+});
+
+test("a parked office is not finished, and is never handed out again", async () => {
+  // Marking it done would be the deleted-repository bug in a new costume: an office
+  // whose history stops early, recorded as fully walked.
+  const c = clock();
+  const h = await harness(async () => {
+    throw new Error("Not Found");
+  });
+  h.deps.now = c.now;
+  h.deps.random = NO_JITTER;
+  await h.backfills.enqueue(OFFICE);
+
+  for (let i = 0; i < MAX_BACKFILL_FAILURES; i++) {
+    await backfillStep(OFFICE, h.deps);
+    c.advance(BACKOFF_CAP_MS);
+  }
+
+  assert.equal((await h.backfills.get(OFFICE))?.done, false, "its history really is unfinished");
+  assert.equal(await h.backfills.next(), undefined, "but there is nothing to be gained by trying again");
+});
+
+test("parking says which office and why", async () => {
+  // A decision to stop trying that nobody can see is indistinguishable from a backfill
+  // that silently never ran.
+  const c = clock();
+  const h = await harness(async () => {
+    throw new Error("Repository access blocked");
+  });
+  h.deps.now = c.now;
+  h.deps.random = NO_JITTER;
+
+  for (let i = 0; i < MAX_BACKFILL_FAILURES; i++) {
+    await backfillStep(OFFICE, h.deps);
+    c.advance(BACKOFF_CAP_MS);
+  }
+
+  const parked = h.lines.find((l) => l.msg === "backfill parked");
+  assert.ok(parked, "parking is logged");
+  assert.equal(parked.officeId, OFFICE);
+  assert.equal(parked.reason, "Repository access blocked");
+  assert.equal(parked.level, "warn");
+});
+
+test("a parked office is not stepped again even when named directly", async () => {
+  let calls = 0;
+  const h = await harness(async () => {
+    calls += 1;
+    throw new Error("gone");
+  });
+  await h.backfills.save({
+    officeId: OFFICE,
+    cursor: { pullsPage: 1, issuesPage: 1 },
+    done: false,
+    spent: 3,
+    failures: MAX_BACKFILL_FAILURES,
+    parked: "gone",
+  });
+
+  const outcome = await backfillStep(OFFICE, h.deps);
+
+  assert.deepEqual(outcome, { status: "parked", officeId: OFFICE, reason: "gone" });
+  assert.equal(calls, 0, "it did not spend a request to confirm what it already knows");
+});
+
+test("an office id that is not one is parked, since waiting cannot fix it", async () => {
+  const h = await harness(async () => {
+    throw new Error("should not be reached");
+  });
+  const outcome = await backfillStep("not-an-office-id", h.deps);
+  assert.equal(outcome.status, "parked");
 });

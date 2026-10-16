@@ -26,11 +26,42 @@ export const DEFAULT_BACKFILL_INTERVAL_MS = 60_000;
 /** Requests one step may spend. Small enough that a sweep never dominates the limit. */
 export const DEFAULT_BACKFILL_BUDGET = 12;
 
+/** How long an office waits after its first failure. Doubles from here. */
+export const BACKOFF_BASE_MS = 5_000;
+/** The longest a failing office ever waits between attempts. */
+export const BACKOFF_CAP_MS = 3_600_000;
+/** Consecutive failures after which an office is parked instead of retried. */
+export const MAX_BACKFILL_FAILURES = 10;
+
+/**
+ * How long to wait before attempting a failing office again.
+ *
+ * Doubling, capped, and jittered. The jitter is not decoration: offices fail together
+ * far more often than they fail alone — a rate limit, an outage, an expired
+ * installation — and without it everything that broke in the same minute comes back in
+ * lockstep for as long as the cause lasts.
+ */
+export function retryDelayMs(failures: number, random: () => number = Math.random): number {
+  const doubled = BACKOFF_BASE_MS * 2 ** Math.max(0, failures - 1);
+  const capped = Math.min(doubled, BACKOFF_CAP_MS);
+  return Math.round(capped * (0.8 + random() * 0.4));
+}
+
 export interface BackfillRecord {
   officeId: string;
   cursor: HistoryCursor;
   done: boolean;
   spent: number;
+  /** Failures in a row. Any step that gets through puts it back to zero. */
+  failures: number;
+  /** While backing off: the moment before which there is no point trying again. */
+  retryAfter?: string | undefined;
+  /**
+   * Why the office was given up on. Set means parked, which is *not* `done`: a
+   * repository that cannot be read has an unfinished history, and recording it as
+   * complete would be the deleted-repository bug again in a better disguise.
+   */
+  parked?: string | undefined;
 }
 
 /**
@@ -54,12 +85,16 @@ export interface BackfillDeps {
   apiUrl?: string | undefined;
   budget?: number | undefined;
   stepImpl?: typeof historyStep | undefined;
+  /** Injectable so the backoff can be tested without waiting for it. */
+  now?: (() => number) | undefined;
+  random?: (() => number) | undefined;
 }
 
 export type BackfillOutcome =
   | { status: "progressed"; officeId: string; events: number; done: boolean }
   | { status: "no_installation"; officeId: string }
-  | { status: "failed"; officeId: string; error: string };
+  | { status: "parked"; officeId: string; reason: string }
+  | { status: "failed"; officeId: string; error: string; failures: number; retryAfter: string };
 
 /**
  * Actors arrive as a side-channel from the walk rather than as events, so they are
@@ -89,13 +124,21 @@ function actorEvents(officeId: string, actors: Actor[], events: OfficeEvent[]): 
 export async function backfillStep(officeId: string, deps: BackfillDeps): Promise<BackfillOutcome> {
   const log = deps.logger ?? silentLogger;
   const [owner, repo] = officeId.split("/");
-  if (!owner || !repo) return { status: "failed", officeId, error: "malformed office id" };
+  // Parked rather than failed: no amount of waiting turns this into a repository.
+  if (!owner || !repo) return { status: "parked", officeId, reason: "malformed office id" };
 
   const installation = await deps.installations.byAccount(owner);
   if (!installation) return { status: "no_installation", officeId };
 
-  const record = (await deps.backfills.get(officeId)) ?? { officeId, cursor: FIRST_STEP, done: false, spent: 0 };
+  const record = (await deps.backfills.get(officeId)) ?? {
+    officeId,
+    cursor: FIRST_STEP,
+    done: false,
+    spent: 0,
+    failures: 0,
+  };
   if (record.done) return { status: "progressed", officeId, events: 0, done: true };
+  if (record.parked !== undefined) return { status: "parked", officeId, reason: record.parked };
 
   try {
     const token = await deps.appAuth.installationToken(installation.installationId);
@@ -114,11 +157,14 @@ export async function backfillStep(officeId: string, deps: BackfillDeps): Promis
     // other order would silently skip it.
     const all = [...actorEvents(officeId, step.actors, step.events), ...step.events];
     if (all.length > 0) await deps.store.appendEvents(officeId, all);
+    // A step that got through clears the backoff: `failures` counts them in a row, not
+    // for all time, so an office that was rate-limited last hour starts even again.
     await deps.backfills.save({
       officeId,
       cursor: step.cursor,
       done: step.done,
       spent: record.spent + step.spent,
+      failures: 0,
     });
 
     log.info("backfill step", {
@@ -137,11 +183,28 @@ export async function backfillStep(officeId: string, deps: BackfillDeps): Promis
     // queue — `next()` orders by when a row was last touched, and an office with no row
     // is always first, so one permanently broken repository took every turn forever
     // and the healthy ones were never walked. Found by watching exactly that happen.
-    await deps.backfills
-      .save({ officeId, cursor: record.cursor, done: false, spent: record.spent })
-      .catch(() => {});
-    log.warn("backfill step failed", { officeId, ...errorFields(err) });
-    return { status: "failed", officeId, error: err instanceof Error ? err.message : String(err) };
+    //
+    // Yielding was enough to unblock the others and not enough to stop the waste: a
+    // repository that was deleted, renamed or made private came back every interval,
+    // for ever, each time costing a request. Hence the backoff, and a limit.
+    const message = err instanceof Error ? err.message : String(err);
+    const failures = record.failures + 1;
+    const base = { officeId, cursor: record.cursor, done: false, spent: record.spent, failures };
+
+    if (failures >= MAX_BACKFILL_FAILURES) {
+      await deps.backfills.save({ ...base, parked: message }).catch(() => {});
+      // At warn, with the office named: parking is a decision to stop trying, and a
+      // decision nobody can see is indistinguishable from a backfill that silently
+      // never ran.
+      log.warn("backfill parked", { officeId, failures, reason: message, spent: record.spent });
+      return { status: "parked", officeId, reason: message };
+    }
+
+    const now = (deps.now ?? Date.now)();
+    const retryAfter = new Date(now + retryDelayMs(failures, deps.random ?? Math.random)).toISOString();
+    await deps.backfills.save({ ...base, retryAfter }).catch(() => {});
+    log.warn("backfill step failed", { officeId, failures, retryAfter, ...errorFields(err) });
+    return { status: "failed", officeId, error: message, failures, retryAfter };
   }
 }
 
@@ -184,24 +247,39 @@ export function scheduleBackfill(deps: BackfillDeps, intervalMs = DEFAULT_BACKFI
 /** Process-local backfill state. The default when there is no database. */
 export class InMemoryBackfillStore implements BackfillStore {
   readonly #records = new Map<string, BackfillRecord>();
+  readonly #now: () => number;
+
+  constructor(now: () => number = Date.now) {
+    this.#now = now;
+  }
 
   async get(officeId: string): Promise<BackfillRecord | undefined> {
     return this.#records.get(officeId);
   }
 
   async save(record: BackfillRecord): Promise<void> {
+    // Deleted before set, so the map's insertion order *is* least-recently-touched
+    // order and `next()` can read it off the front. The Postgres store orders by
+    // `updated_at` for the same reason; the two have to agree, because the tests run
+    // against this one.
+    this.#records.delete(record.officeId);
     this.#records.set(record.officeId, { ...record });
   }
 
   async next(): Promise<BackfillRecord | undefined> {
-    for (const record of this.#records.values()) if (!record.done) return record;
+    const now = this.#now();
+    for (const record of this.#records.values()) {
+      if (record.done || record.parked !== undefined) continue;
+      if (record.retryAfter !== undefined && Date.parse(record.retryAfter) > now) continue;
+      return record;
+    }
     return undefined;
   }
 
   /** Offices the scheduler has not been told about yet get walked from the start. */
   async enqueue(officeId: string): Promise<void> {
     if (this.#records.has(officeId)) return;
-    await this.save({ officeId, cursor: FIRST_STEP, done: false, spent: 0 });
+    await this.save({ officeId, cursor: FIRST_STEP, done: false, spent: 0, failures: 0 });
   }
 }
 
@@ -214,22 +292,53 @@ export class PostgresBackfillStore implements BackfillStore {
   }
 
   async get(officeId: string): Promise<BackfillRecord | undefined> {
-    const { rows } = await this.#db.query<{ cursor: HistoryCursor; done: boolean; spent: number }>(
-      "select cursor, done, spent from backfill_state where office_id = $1",
+    const { rows } = await this.#db.query<{
+      cursor: HistoryCursor;
+      done: boolean;
+      spent: number;
+      failures: number;
+      retry_after: Date | string | null;
+      parked_reason: string | null;
+    }>(
+      "select cursor, done, spent, failures, retry_after, parked_reason from backfill_state where office_id = $1",
       [officeId],
     );
     const row = rows[0];
-    return row ? { officeId, cursor: row.cursor, done: row.done, spent: row.spent } : undefined;
+    if (!row) return undefined;
+    return {
+      officeId,
+      cursor: row.cursor,
+      done: row.done,
+      spent: row.spent,
+      failures: row.failures,
+      // `pg` hands back a Date for timestamptz; the record speaks ISO strings, as the
+      // rest of the protocol does.
+      ...(row.retry_after !== null ? { retryAfter: new Date(row.retry_after).toISOString() } : {}),
+      ...(row.parked_reason !== null ? { parked: row.parked_reason } : {}),
+    };
   }
 
   async save(record: BackfillRecord): Promise<void> {
+    // Every column is written, including the ones being cleared: a record without a
+    // `retryAfter` means "not backing off", and leaving the old value in place would
+    // make a successful step look like a failing one.
     await this.#db.query(
-      `insert into backfill_state (office_id, cursor, done, spent)
-            values ($1, $2, $3, $4)
+      `insert into backfill_state (office_id, cursor, done, spent, failures, retry_after, parked_reason)
+            values ($1, $2, $3, $4, $5, $6, $7)
        on conflict (office_id)
        do update set cursor = excluded.cursor, done = excluded.done,
-                     spent = excluded.spent, updated_at = now()`,
-      [record.officeId, JSON.stringify(record.cursor), record.done, record.spent],
+                     spent = excluded.spent, failures = excluded.failures,
+                     retry_after = excluded.retry_after, parked_reason = excluded.parked_reason,
+                     updated_at = now()`,
+      [
+        record.officeId,
+        JSON.stringify(record.cursor),
+        record.done,
+        record.spent,
+        record.failures,
+        record.retryAfter ?? null,
+        record.parked ?? null,
+      ],
     );
   }
 
@@ -239,13 +348,25 @@ export class PostgresBackfillStore implements BackfillStore {
    *
    * An office with no row yet is picked up too: `offices` is the list of what exists,
    * and anything in it without backfill state has never been walked.
+   *
+   * Parked offices and offices inside their backoff are not handed out at all. They
+   * are still unfinished — that is the point of not marking them `done` — but handing
+   * one out early would mean a step that can only fail again.
    */
   async next(): Promise<BackfillRecord | undefined> {
-    const { rows } = await this.#db.query<{ office_id: string; cursor: HistoryCursor | null; spent: number | null }>(
-      `select o.office_id, b.cursor, b.spent
+    const { rows } = await this.#db.query<{
+      office_id: string;
+      cursor: HistoryCursor | null;
+      spent: number | null;
+      failures: number | null;
+    }>(
+      `select o.office_id, b.cursor, b.spent, b.failures
          from offices o
          left join backfill_state b on b.office_id = o.office_id
-        where b.office_id is null or b.done = false
+        where b.office_id is null
+           or (b.done = false
+               and b.parked_reason is null
+               and (b.retry_after is null or b.retry_after <= now()))
         order by b.updated_at asc nulls first
         limit 1`,
     );
@@ -256,6 +377,7 @@ export class PostgresBackfillStore implements BackfillStore {
       cursor: row.cursor ?? FIRST_STEP,
       done: false,
       spent: row.spent ?? 0,
+      failures: row.failures ?? 0,
     };
   }
 }
