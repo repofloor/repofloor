@@ -71,9 +71,11 @@ none of it is scheduled, and Phase 2 stays ahead of it.
       page in `apps/demo` still has neither
 - [x] Running activity log of recent events, which is what makes the page readable on a phone.
       Same: `apps/web` only, and `apps/demo` could lift `src/describe.ts` wholesale
-- [ ] Rooms as architecture: interior walls, doorways, a corridor — not tinted regions
-- [ ] Furniture parameterised by room kind (meeting table, sofa, plants), still procedural
-- [ ] Palette pass: desaturated furniture, colour reserved for people
+- [x] Rooms as architecture: interior walls, doorways, a corridor — not tinted regions
+- [x] Furniture parameterised by room kind (meeting table, sofa, plants), still procedural
+- [x] Palette pass: desaturated furniture, colour reserved for people
+- [ ] Sprite-sheet skin as an optional layer (the reference is a bought tileset; rule 5
+      keeps procedural the default and makes this a layer on top)
 
 ## Phase 3 — Agents
 - [ ] Agent tokens; `POST /agent/events`

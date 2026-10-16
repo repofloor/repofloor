@@ -46,6 +46,9 @@ reference is a *building interior*. That gap is the work.
 
 ## Where this lands
 
+![The floor plan, after the Phase 1.5 structural pass](assets/office-floorplan.png)
+
+
 Not scheduled yet. Phase 2 (Full mode: `apps/api`, `apps/realtime`, `apps/web`) stays
 ahead of it — a prettier floor with nothing live on it is worth less than a plain floor
 that updates in a second.
@@ -57,8 +60,15 @@ Candidates when it is time, cheapest first:
   page in `apps/demo` can lift it as it is). Items 5 and 6 came with it: the office page
   has a status bar with a live indicator and a clock, and it finally tells people that
   they can click a person, drag to pan and scroll to zoom
-- room walls and doorways in `computeLayout`
-- furniture parameterised by room kind
+- ~~room walls and doorways in `computeLayout`~~ — done. `computeLayout` is a floor-plan
+  generator now: a shell with one entrance, rooms as walled boxes each with a doorway onto
+  a corridor, and an open plan of desk pods between them. It emits a cell grid rather than
+  a list of rectangles, which is also what A* walking (#5) will read
+- ~~furniture parameterised by room kind~~ — done, procedurally: a meeting room gets a
+  table, a focus room a sofa, every room a cabinet and a plant, and the corridor a printer
+  and the coffee machine
+- ~~palette pass~~ — done: floor materials differ by cell kind (corridor, open plan, and a
+  tint per room kind), walls are drawn as a body plus a lit edge so they read as height
 - palette pass
 
 The `good first issue` set (#1-#16) stays as it is; these are larger than those and
