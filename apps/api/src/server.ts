@@ -16,6 +16,10 @@
  *                             App (default 6h). 0 turns it off. Needs the App identity
  *                             and Postgres; without either it does not start.
  *   RESYNC_HOURS              how far back a resync looks (default 72)
+ *   BACKFILL_INTERVAL_MS      how often one office takes a step back through its own
+ *                             history (default 60000). 0 turns it off. Needs the App
+ *                             identity and Postgres, like the resync.
+ *   BACKFILL_BUDGET           API requests one step may spend (default 12)
  *
  * Sign-in and the App identity are optional. Set them and `/auth/...` comes alive;
  * leave them unset and the service behaves exactly as before, with every caller
@@ -48,6 +52,14 @@ import { GitHubOAuth } from "./oauth.js";
 import { NoopEventPublisher, type EventPublisher } from "./publisher.js";
 import { PostgresEventPublisher } from "./publisher-postgres.js";
 import { scheduleResync, DEFAULT_RESYNC_INTERVAL_MS, type ResyncSchedule } from "./resync.js";
+import {
+  scheduleBackfill,
+  InMemoryBackfillStore,
+  PostgresBackfillStore,
+  DEFAULT_BACKFILL_INTERVAL_MS,
+  type BackfillSchedule,
+  type BackfillStore,
+} from "./backfill.js";
 import { InMemorySessionStore } from "./session.js";
 import { SignIn } from "./sign-in.js";
 import { InMemoryOfficeStore, type OfficeStore } from "./store.js";
@@ -76,6 +88,7 @@ let installations: InstallationStore;
  * The noop keeps that honest rather than pretending an in-memory run has fan-out.
  */
 let publisher: EventPublisher = new NoopEventPublisher();
+let backfills: BackfillStore = new InMemoryBackfillStore();
 let close: () => Promise<void> = async () => {};
 
 if (databaseUrl) {
@@ -104,6 +117,7 @@ if (databaseUrl) {
   store = pg;
   installations = new PostgresInstallationStore(pool);
   publisher = new PostgresEventPublisher(pool, { logger: log });
+  backfills = new PostgresBackfillStore(pool);
 
   const prune = (): void => {
     pg.pruneDeliveries()
@@ -170,6 +184,31 @@ if (appAuth && databaseUrl && Number.isFinite(resyncInterval) && resyncInterval 
   });
 }
 
+/**
+ * The backfill (2.5-H4). Reaches backwards to the first commit so an office can be
+ * replayed from the beginning, one bounded step at a time. Same preconditions as the
+ * resync, and the same reason: it needs to act as the App and have somewhere to put
+ * what it finds.
+ */
+let backfill: BackfillSchedule | undefined;
+const backfillInterval = Number(process.env["BACKFILL_INTERVAL_MS"] ?? DEFAULT_BACKFILL_INTERVAL_MS);
+if (appAuth && databaseUrl && Number.isFinite(backfillInterval) && backfillInterval > 0) {
+  const backfillBudget = Number(process.env["BACKFILL_BUDGET"]);
+  backfill = scheduleBackfill(
+    {
+      store,
+      backfills,
+      installations,
+      appAuth,
+      logger: log,
+      ...(apiUrl ? { apiUrl } : {}),
+      ...(Number.isFinite(backfillBudget) && backfillBudget > 0 ? { budget: backfillBudget } : {}),
+    },
+    backfillInterval,
+  );
+  log.info("backfill scheduled", { intervalMs: backfillInterval });
+}
+
 const server = createServer(app.handler);
 
 server.listen(port, host, () => {
@@ -191,6 +230,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     log.info("shutting down", { signal });
     resync?.stop();
+    backfill?.stop();
     server.close(() => {
       close().then(
         () => process.exit(0),

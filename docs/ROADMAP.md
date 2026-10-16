@@ -95,7 +95,7 @@ time. Rule 6, and ADR 0003 decision 1.
 - [ ] **H2** A player over those: scrub, play/pause, speed, feeding `applyEffect`
 - [x] **H3** `apps/api` stores event bodies on ingest, in the transaction that saves the
       snapshot. A table beside `applied_events`, which stays a dedup ledger
-- [ ] **H4** Backfill as the App: unbounded, resumable historical collection
+- [x] **H4** Backfill as the App: unbounded, resumable historical collection
 - [ ] **H5** `GET /office/:owner/:repo/events?from=&to=` and the player over all of it
 
 ## Phase 3 — Agents

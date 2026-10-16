@@ -269,3 +269,10 @@ export async function collectWithEvents(opts: CollectOptions): Promise<Collected
   const all = [...upserts, ...events].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   return { state: replay(state, all, now.toISOString()), events: all };
 }
+export {
+  historyStep,
+  FIRST_STEP,
+  type HistoryCursor,
+  type HistoryStep,
+  type HistoryStepOptions,
+} from "./history.js";

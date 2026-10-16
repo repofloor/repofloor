@@ -60,6 +60,11 @@ services:
       # whatever the webhook stream missed. Needs the App identity above; 0 disables.
       RESYNC_INTERVAL_MS: ${RESYNC_INTERVAL_MS:-}
       RESYNC_HOURS: ${RESYNC_HOURS:-}
+      # The backfill walks each office back to its first commit, one bounded step at a
+      # time, so it can be replayed from the beginning. Same preconditions as the
+      # resync; 0 disables.
+      BACKFILL_INTERVAL_MS: ${BACKFILL_INTERVAL_MS:-}
+      BACKFILL_BUDGET: ${BACKFILL_BUDGET:-}
     ports:
       - "${API_PORT:-8787}:8787"
     depends_on:

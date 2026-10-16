@@ -119,6 +119,19 @@ export {
   type LoggerOptions,
 } from "./log.js";
 export {
+  backfillStep,
+  scheduleBackfill,
+  InMemoryBackfillStore,
+  PostgresBackfillStore,
+  DEFAULT_BACKFILL_BUDGET,
+  DEFAULT_BACKFILL_INTERVAL_MS,
+  type BackfillDeps,
+  type BackfillOutcome,
+  type BackfillRecord,
+  type BackfillSchedule,
+  type BackfillStore,
+} from "./backfill.js";
+export {
   resyncAll,
   resyncOffice,
   scheduleResync,
