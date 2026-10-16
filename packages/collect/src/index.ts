@@ -60,7 +60,15 @@ export async function collect(opts: CollectOptions): Promise<OfficeState> {
   };
 
   const full = `${opts.owner}/${opts.repo}`;
-  const repo = o(await get(`/repos/${full}`));
+  // The repository itself is fetched strictly. `get` turns a 404 into an empty list,
+  // which is right for a sub-resource — no commits yet, no contributors, a 409 for an
+  // empty repo — and wrong here: a repository that is gone, renamed, or that this
+  // token cannot see would otherwise produce a valid, empty snapshot. Full mode's
+  // resync replaces what it has with what it collects, so that silently blanks a real
+  // office. Failing is what leaves the old snapshot alone.
+  const repoResponse = await f(`${api}/repos/${full}`, { headers });
+  if (!repoResponse.ok) throw new Error(`GitHub API ${repoResponse.status} for /repos/${full}`);
+  const repo = o(await repoResponse.json());
   const ownerObj = o(repo["owner"]);
   const defaultBranch = s(repo["default_branch"], "main");
 
