@@ -187,6 +187,11 @@ _Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realti
 
 ## Not yet done / known rough edges
 
+- Engine: a long two-word display name ("Ali Osman") is wider than the three tiles between desks, so it
+  crowds its neighbours even with the label stagger. Worth noting because it fooled us once: at a zoomed-out
+  view that one label reads as two overlapping ones, and PR #31 describes it as an avatar-placement bug.
+  It is not — there is no placement bug; it is one wide label.
+
 - Speech bubbles overlap when several actors in the top desk row talk at once (needs simple collision/stagger).
 - Avatars walk in straight lines through desks (A* on the tile grid — issue #5).
 - `applyEffect` is called by the demo; Lite page never calls it (no live events) — fine for now.
