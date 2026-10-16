@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyOfficeState, PROTOCOL_VERSION, type OfficeEvent, type OfficeState } from "@repofloor/protocol";
-import { OfficeHub, type Client, type SnapshotSource } from "../src/hub.ts";
+import { OfficeHub, RESYNC_CONCURRENCY, type Client, type SnapshotSource } from "../src/hub.ts";
 import type { ServerMessage } from "../src/wire.ts";
 
 const OFFICE = "repofloor/repofloor";
@@ -266,5 +266,36 @@ test("closeAll says goodbye to everyone", () => {
 
   hub.closeAll();
   assert.equal(client.closed?.code, 1001);
+  assert.equal(hub.officeCount, 0);
+});
+
+test("a post-reconnect sweep rebuilds a few offices at a time, not all at once", async () => {
+  // resyncAll runs the instant the listener reconnects — when the database has just
+  // come back and is least able to absorb a spike. `Promise.all` turned "we lost the
+  // connection" into one query per office and a send to every socket, all together.
+  let inFlight = 0;
+  let peak = 0;
+  const snapshots: SnapshotSource = {
+    async load() {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight -= 1;
+      return state();
+    },
+  };
+
+  const hub = new OfficeHub({ snapshots, now: () => "2026-10-16T09:00:00.000Z" });
+  for (let i = 0; i < 20; i++) hub.join(`repofloor/office-${i}`, new FakeClient(), state());
+
+  await hub.resyncAll();
+
+  assert.ok(peak <= RESYNC_CONCURRENCY, `peaked at ${peak} concurrent loads`);
+  assert.equal(hub.officeCount, 20, "and every office was still reached");
+});
+
+test("resyncAll with nothing to do finishes rather than hanging", async () => {
+  const hub = new OfficeHub({ snapshots: { load: async () => state() } });
+  await hub.resyncAll();
   assert.equal(hub.officeCount, 0);
 });
