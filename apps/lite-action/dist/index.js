@@ -467,10 +467,12 @@ async function main() {
   const site = join(here, "site");
   try {
     await cp(site, outDir, { recursive: true });
-    await retitle(join(outDir, "index.html"), repoFull);
-  } catch {
-    console.warn("repofloor: static site bundle not found at", site, "- only office-state.json written");
+  } catch (err) {
+    throw new Error(
+      `repofloor: the static office page is missing from this action (looked in ${site}). The snapshot was built, but publishing ${outDir} would give you a page that 404s. This is a packaging fault in the action, not something wrong with your repository \u2014 please open an issue at https://github.com/repofloor/repofloor/issues. Cause: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
+  await retitle(join(outDir, "index.html"), repoFull);
   const online = state.actors.filter((a) => a.status !== "offline").length;
   console.log(`repofloor: ${state.actors.length} actors (${online} active), ${state.pullRequests.length} open PRs, CI=${state.defaultBranchCi ?? "n/a"} \u2192 ${outDir}/`);
   if (process.env["GITHUB_OUTPUT"]) {
