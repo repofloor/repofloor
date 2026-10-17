@@ -258,22 +258,33 @@ _Last updated: 2026-10-15 (Phase 2A, 2B and 2C done: api hardening, `apps/realti
 - `apps/web`: the office page polls nothing. If the socket is refused, the snapshot is whatever the first
   `GET` returned and it ages in place — correct, but a Lite-style poll would be a cheap fallback.
 - `apps/demo` still has no status strip and no activity log; `src/describe.ts` is pure and could be lifted.
+- `apps/api`: a **parked** backfill (ten consecutive failures — a repository deleted, renamed or made
+  private) is visible only as a `warn` line and a `parked_reason` column. Nothing unparks it, and nothing
+  reports it: an office whose history quietly stops early looks exactly like one nobody asked for.
+  A rename is the case worth fixing first, since the repository still exists under a new name.
+- Phase 2.5 covers the hosted player and the Lite window. There is no *link* to a moment: a replay cannot
+  be shared, because the cursor lives in memory rather than in the URL.
 
 ## Immediate next steps (suggested order)
 
 The remaining Full-mode work is phased in [`docs/ROADMAP.md`](ROADMAP.md) as **2A → 2B → 2C → 2D**,
 and each sub-phase there is lettered (A1, A2, …). This list says only where we are in it:
 
-1. ~~**2A — `apps/api` hardening**~~, done. A1 lifts the read check out of `handleOffice`
-   (2B's socket needs the identical check), A2 makes ingest atomic, A3 clears the operational
-   leftovers. Nothing in 2B/2C should start before A1.
-2. ~~**2B — `apps/realtime`**, then **2C — `apps/web`**~~ — both done. Next is **2D — run it against
-   the real GitHub and a real Docker host**, and D1 now has a web service to add to
-   `docker-compose.yml` beside api and realtime. D2 matters more than it looks: no part of the
-   sign-in flow has ever met github.com, and `apps/web` has only ever met its own fixture.
-3. Phase 1 polish (bubble stagger, A* walking #5, night tint #4, text alternative #15) is
+1. ~~**2A — `apps/api` hardening**~~, ~~**2B — `apps/realtime`**~~, ~~**2C — `apps/web`**~~ and
+   ~~**Phase 2.5 — history and replay**~~ are all done. The chain has been run end to end against
+   the real github.com: sign-in, webhooks, `pg_notify` → socket, resync minting installation
+   tokens, and a backfill that reached two seconds after the repository was created.
+2. **2D is finished except D2 and D4.** D2 is a maintainer step, not a coding one: push to a repo
+   the App is installed on, so a real webhook arrives. D4 (sessions across restarts) waits until
+   running in more than one place actually hurts — sessions are in memory on purpose, to keep
+   every credential out of the database.
+3. **The external `uses:` path is still unproven.** Nobody has yet added the published action to a
+   repository that is not this one. Deliberate: the only candidate had a live Pages site of its own.
+4. Phase 1 polish (bubble stagger, A* walking #5, night tint #4, text alternative #15) is
    deliberately *not* in this queue — those are the `good first issue` set, left for contributors.
    Take one only if it ages without a taker.
+5. Next substantial phase is **Phase 3 — agents**, which is the first thing the protocol was
+   shaped for (`kind: "agent"`) and has had nothing built on it yet.
 
 ## Decisions already made
 
