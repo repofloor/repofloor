@@ -48,7 +48,7 @@ jobs:
       WEBHOOK_SECRET: ci-interpolation-only
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build every image docker-compose.yml defines
         # bake reads the compose file itself, so a service added there is covered
         # without anyone remembering to add it here too.
