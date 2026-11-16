@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@repofloor/protocol": "workspace:*",
-    "pixi.js": "^8.6.0"
+    "pixi.js": "^8.23.0"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
